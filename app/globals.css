@@ -1,17 +1,43 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0a0a12;
-  --foreground: #e8e8f0;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --surface: #151520;
-  --surface-hover: #1e1e2e;
-  --border: #2a2a3a;
-  --success: #22c55e;
-  --warning: #eab308;
-  --danger: #ef4444;
-  --muted: #6b7280;
+  /* NASA-inspired palette */
+  --nasa-navy: #0B1026;
+  --nasa-dark: #060d1f;
+  --nasa-panel: #0d1533;
+  --nasa-panel-hover: #111d42;
+  --nasa-red: #FC3D21;
+  --nasa-red-dark: #d42d14;
+  --nasa-blue: #105BD8;
+  --nasa-blue-light: #4d8fea;
+  --nasa-white: #E6E8EC;
+  --nasa-silver: #B3B8C4;
+  --nasa-gold: #FFB800;
+  --nasa-gold-dim: #8a6500;
+  --nasa-green: #00E676;
+  --nasa-green-dim: #00703a;
+  --nasa-cyan: #00E5FF;
+  --nasa-orange: #FF6D00;
+  --nasa-border: #1a2744;
+  --nasa-border-light: #253660;
+  --nasa-muted: #5a6785;
+  --nasa-grid: rgba(26, 39, 68, 0.5);
+
+  /* Map to semantic tokens */
+  --background: var(--nasa-dark);
+  --foreground: var(--nasa-white);
+  --accent: var(--nasa-red);
+  --accent-hover: var(--nasa-red-dark);
+  --surface: var(--nasa-panel);
+  --surface-hover: var(--nasa-panel-hover);
+  --border: var(--nasa-border);
+  --border-light: var(--nasa-border-light);
+  --success: var(--nasa-green);
+  --warning: var(--nasa-gold);
+  --danger: var(--nasa-red);
+  --muted: var(--nasa-muted);
+  --data: var(--nasa-cyan);
+  --data-dim: #006b7a;
 }
 
 @theme inline {
@@ -31,17 +57,99 @@ body {
   min-height: 100vh;
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 8px;
+/* Subtle grid background — control room display feel */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--nasa-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--nasa-grid) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.4;
 }
-::-webkit-scrollbar-track {
-  background: var(--background);
+
+body > * {
+  position: relative;
+  z-index: 1;
 }
-::-webkit-scrollbar-thumb {
-  background: var(--border);
+
+/* NASA-style label typography */
+.label-nasa {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Data readout — monospace telemetry look */
+.data-readout {
+  font-family: var(--font-mono);
+  color: var(--data);
+  letter-spacing: 0.02em;
+}
+
+/* Status dot indicators */
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-dot--active { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.status-dot--warning { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
+.status-dot--danger { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+.status-dot--inactive { background: var(--muted); }
+
+/* Instrument panel section */
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 4px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
-::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+
+.panel-header {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* Thin red accent line (NASA chevron stripe) */
+.nasa-stripe {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--nasa-red), transparent);
+}
+
+/* Glow effects for active elements */
+.glow-red { box-shadow: 0 0 12px rgba(252, 61, 33, 0.3); }
+.glow-cyan { box-shadow: 0 0 12px rgba(0, 229, 255, 0.2); }
+.glow-green { box-shadow: 0 0 12px rgba(0, 230, 118, 0.2); }
+.glow-gold { box-shadow: 0 0 12px rgba(255, 184, 0, 0.2); }
+
+/* Star rating */
+.star-filled { color: var(--nasa-gold); text-shadow: 0 0 4px rgba(255, 184, 0, 0.5); }
+.star-empty { color: var(--nasa-border-light); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--background); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* Selection */
+::selection {
+  background: rgba(252, 61, 33, 0.3);
+  color: var(--foreground);
 }

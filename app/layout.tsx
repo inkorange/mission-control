@@ -14,7 +14,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Mission Control",
-  description: "Rocket engineering challenge — design, build, and launch rockets to complete space missions",
+  description:
+    "Rocket engineering challenge — design, build, and launch rockets to complete space missions",
 };
 
 export default function RootLayout({
@@ -25,24 +26,58 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <div className="min-h-screen flex flex-col">
-          <header className="border-b border-border px-6 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <h1 className="text-lg font-bold tracking-tight">
-                MISSION CONTROL
-              </h1>
-              <span className="text-xs text-muted px-2 py-0.5 border border-border rounded">
-                v0.1
-              </span>
+          {/* NASA-style header */}
+          <header className="border-b border-[var(--border)] bg-[var(--surface)]">
+            {/* Red accent stripe */}
+            <div className="h-[2px] bg-gradient-to-r from-transparent via-[var(--nasa-red)] to-transparent" />
+
+            <div className="px-6 py-2.5 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                {/* Agency mark */}
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full border-2 border-[var(--nasa-red)] flex items-center justify-center">
+                    <div className="w-4 h-4 rounded-full border border-[var(--nasa-blue-light)] flex items-center justify-center">
+                      <div className="w-1 h-1 rounded-full bg-[var(--nasa-red)]" />
+                    </div>
+                  </div>
+                  <div>
+                    <h1 className="text-sm font-bold tracking-[0.2em] uppercase text-[var(--foreground)]">
+                      Mission Control
+                    </h1>
+                    <p className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-[var(--muted)]">
+                      Rocket Engineering Division
+                    </p>
+                  </div>
+                </div>
+
+                <div className="h-6 w-px bg-[var(--border)]" />
+
+                {/* Status indicator */}
+                <div className="flex items-center gap-1.5">
+                  <span className="status-dot status-dot--active" />
+                  <span className="font-mono text-[0.6rem] tracking-wider uppercase text-[var(--nasa-green)]">
+                    Systems Nominal
+                  </span>
+                </div>
+              </div>
+
+              <nav className="flex items-center gap-5">
+                <a
+                  href="/"
+                  className="font-mono text-[0.65rem] tracking-[0.15em] uppercase text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+                >
+                  Missions
+                </a>
+                <span className="font-mono text-[0.6rem] tracking-wider text-[var(--border-light)]">
+                  v0.1.0
+                </span>
+              </nav>
             </div>
-            <nav className="flex items-center gap-4 text-sm">
-              <a href="/" className="text-muted hover:text-foreground transition-colors">
-                Missions
-              </a>
-            </nav>
           </header>
+
           <main className="flex-1">{children}</main>
         </div>
       </body>
