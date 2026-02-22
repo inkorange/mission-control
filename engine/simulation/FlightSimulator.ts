@@ -10,7 +10,7 @@ import type { Mission, OrbitalTarget } from "@/types/mission";
 
 export interface FlightEvent {
   time: number;
-  type: "ignition" | "stage_separation" | "burn_start" | "burn_stop" | "abort" | "orbit_achieved";
+  type: "ignition" | "stage_separation" | "fuel_depleted" | "burn_start" | "burn_stop" | "abort" | "orbit_achieved";
   stageIndex?: number;
   description: string;
 }
@@ -265,6 +265,23 @@ export class FlightSimulator {
       this.state.fuel = stage.fuelRemaining;
     }
 
+    // Auto-stage when current stage fuel is depleted and more stages exist
+    if (stage.fuelRemaining <= 0 && this.currentStageIndex < this.stages.length - 1) {
+      this.events.push({
+        time: this.state.time,
+        type: "fuel_depleted",
+        stageIndex: this.currentStageIndex,
+        description: `Stage ${this.currentStageIndex + 1} fuel depleted`,
+      });
+      this.triggerStageSeparation();
+      this.events.push({
+        time: this.state.time,
+        type: "ignition",
+        stageIndex: this.currentStageIndex,
+        description: `Stage ${this.currentStageIndex + 1} ignition`,
+      });
+    }
+
     // RK4 integration
     this.state = rk4Step(
       this.state,
@@ -289,6 +306,24 @@ export class FlightSimulator {
       this.outcome = "crash";
       this.isRunning = false;
       return;
+    }
+
+    // Suborbital mission check: if the mission only requires reaching an altitude
+    // (periapsis.min is -Infinity), check altitude directly without requiring a stable orbit
+    if (this.mission.requirements.targetOrbit) {
+      const target = this.mission.requirements.targetOrbit;
+      const isSuborbitalMission = target.periapsis.min === -Infinity;
+
+      if (isSuborbitalMission && this.state.altitude >= target.apoapsis.min) {
+        this.outcome = "mission_complete";
+        this.isRunning = false;
+        this.events.push({
+          time: this.state.time,
+          type: "orbit_achieved",
+          description: `Altitude ${(this.state.altitude / 1000).toFixed(0)}km reached — mission complete!`,
+        });
+        return;
+      }
     }
 
     // Check orbital status when above atmosphere

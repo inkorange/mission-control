@@ -41,7 +41,7 @@ export default function MissionSelect() {
       <div className="flex items-center justify-center h-[80vh]">
         <div className="text-center">
           <div className="w-6 h-6 border-2 border-[var(--nasa-red)] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="font-mono text-xs tracking-wider uppercase text-[var(--muted)]">
+          <p className="font-mono text-sm tracking-wider uppercase text-[var(--muted)]">
             Loading mission data...
           </p>
         </div>
@@ -52,34 +52,34 @@ export default function MissionSelect() {
   const tiers = [1, 2, 3, 4, 5] as MissionTier[];
 
   return (
-    <div className="relative min-h-[calc(100vh-49px)]">
+    <div className="relative min-h-[calc(100vh-61px)]">
       {/* Background image — launch photo */}
       <div
-        className="fixed inset-0 top-[49px] bg-cover bg-center bg-no-repeat"
+        className="fixed inset-0 top-[61px] bg-cover bg-center bg-no-repeat"
         style={{ backgroundImage: "url('/background.jpg')" }}
       />
       {/* Dark overlay for readability */}
-      <div className="fixed inset-0 top-[49px] bg-[var(--nasa-dark)]/75" />
+      <div className="fixed inset-0 top-[61px] bg-[var(--nasa-dark)]/75" />
 
       <div className="relative z-10 max-w-6xl mx-auto px-6 py-8">
       {/* Page header */}
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-1">
-          <span className="font-mono text-[0.6rem] tracking-[0.2em] uppercase text-[var(--nasa-red)]">
+          <span className="font-mono text-[0.75rem] tracking-[0.2em] uppercase text-[var(--nasa-red)]">
             Flight Operations
           </span>
           <div className="flex-1 h-px bg-[var(--border)]" />
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[0.6rem] tracking-wider uppercase text-[var(--muted)]">
+            <span className="font-mono text-[0.75rem] tracking-wider uppercase text-[var(--muted)]">
               Total Stars
             </span>
-            <span className="font-mono text-sm text-[var(--nasa-gold)]">
+            <span className="font-mono text-base text-[var(--nasa-gold)]">
               {totalStars}
             </span>
           </div>
         </div>
         <h2 className="text-2xl font-bold tracking-tight">Mission Select</h2>
-        <p className="text-sm text-[var(--muted)] mt-1">
+        <p className="text-base text-[var(--muted)] mt-1">
           Select a mission to begin vehicle assembly and launch operations.
         </p>
       </div>
@@ -100,7 +100,7 @@ export default function MissionSelect() {
                 <div className="flex items-center gap-3">
                   <span
                     className={`
-                      font-mono text-[0.65rem] font-bold tracking-[0.15em] uppercase px-2 py-0.5 rounded-sm
+                      font-mono text-[0.8rem] font-bold tracking-[0.15em] uppercase px-2 py-0.5 rounded-sm
                       ${unlocked
                         ? "bg-[var(--nasa-red)]/10 text-[var(--nasa-red)] border border-[var(--nasa-red)]/30"
                         : "bg-[var(--border)]/20 text-[var(--muted)] border border-[var(--border)]"
@@ -110,8 +110,8 @@ export default function MissionSelect() {
                     Tier {tier}
                   </span>
                   <div>
-                    <h3 className="text-sm font-semibold">{TIER_NAMES[tier]}</h3>
-                    <p className="font-mono text-[0.6rem] text-[var(--muted)]">
+                    <h3 className="text-base font-semibold">{TIER_NAMES[tier]}</h3>
+                    <p className="font-mono text-[0.75rem] text-[var(--muted)]">
                       {TIER_DESCRIPTIONS[tier]}
                     </p>
                   </div>
@@ -120,14 +120,14 @@ export default function MissionSelect() {
                   {!unlocked && (
                     <div className="flex items-center gap-1.5">
                       <span className="status-dot status-dot--warning" />
-                      <span className="font-mono text-[0.6rem] tracking-wider uppercase text-[var(--nasa-gold)]">
+                      <span className="font-mono text-[0.75rem] tracking-wider uppercase text-[var(--nasa-gold)]">
                         Locked — {required} stars from Tier {tier - 1}
                       </span>
                     </div>
                   )}
                   {unlocked && (
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-[0.6rem] tracking-wider uppercase text-[var(--muted)]">
+                      <span className="font-mono text-[0.75rem] tracking-wider uppercase text-[var(--muted)]">
                         Progress
                       </span>
                       <div className="flex gap-0.5">
@@ -142,7 +142,7 @@ export default function MissionSelect() {
                           />
                         ))}
                       </div>
-                      <span className="font-mono text-[0.6rem] text-[var(--nasa-gold)]">
+                      <span className="font-mono text-[0.75rem] text-[var(--nasa-gold)]">
                         {tierStars}/{maxStars}
                       </span>
                     </div>
@@ -177,10 +177,10 @@ export default function MissionSelect() {
                       {/* Designation + stars */}
                       <div className="flex items-start justify-between mb-2">
                         <div>
-                          <span className="font-mono text-[0.55rem] tracking-[0.2em] uppercase text-[var(--nasa-blue-light)]">
+                          <span className="font-mono text-[0.7rem] tracking-[0.2em] uppercase text-[var(--nasa-blue-light)]">
                             {mission.codename}
                           </span>
-                          <h4 className="text-sm font-semibold mt-0.5">
+                          <h4 className="text-base font-semibold mt-0.5">
                             {mission.name}
                           </h4>
                         </div>
@@ -188,7 +188,7 @@ export default function MissionSelect() {
                           {[1, 2, 3].map((star) => (
                             <span
                               key={star}
-                              className={`text-xs ${
+                              className={`text-sm ${
                                 result && result.stars >= star
                                   ? "star-filled"
                                   : "star-empty"
@@ -200,7 +200,7 @@ export default function MissionSelect() {
                         </div>
                       </div>
 
-                      <p className="text-[0.7rem] leading-relaxed text-[var(--muted)] line-clamp-2 mb-3">
+                      <p className="text-[0.85rem] leading-relaxed text-[var(--muted)] line-clamp-2 mb-3">
                         {mission.description}
                       </p>
 
@@ -208,19 +208,19 @@ export default function MissionSelect() {
                       <div className="flex items-center justify-between pt-2 border-t border-[var(--border)]">
                         <div className="flex items-center gap-3">
                           <div>
-                            <span className="font-mono text-[0.5rem] tracking-[0.15em] uppercase text-[var(--muted)] block">
+                            <span className="font-mono text-[0.625rem] tracking-[0.15em] uppercase text-[var(--muted)] block">
                               Budget
                             </span>
-                            <span className="font-mono text-[0.7rem] text-[var(--data)]">
+                            <span className="font-mono text-[0.85rem] text-[var(--data)]">
                               ${(mission.budget / 1_000_000).toFixed(0)}M
                             </span>
                           </div>
                           {mission.requirements.minPayloadMass && (
                             <div>
-                              <span className="font-mono text-[0.5rem] tracking-[0.15em] uppercase text-[var(--muted)] block">
+                              <span className="font-mono text-[0.625rem] tracking-[0.15em] uppercase text-[var(--muted)] block">
                                 Payload
                               </span>
-                              <span className="font-mono text-[0.7rem] text-[var(--data)]">
+                              <span className="font-mono text-[0.85rem] text-[var(--data)]">
                                 {mission.requirements.minPayloadMass}kg
                               </span>
                             </div>
@@ -229,7 +229,7 @@ export default function MissionSelect() {
                         {isUnlocked && (
                           <a
                             href={`/builder/${mission.id}`}
-                            className="font-mono text-[0.6rem] tracking-[0.1em] uppercase px-3 py-1.5 bg-[var(--nasa-red)] hover:bg-[var(--nasa-red-dark)] text-white rounded-sm transition-colors"
+                            className="font-mono text-[0.75rem] tracking-[0.1em] uppercase px-3 py-1.5 bg-[var(--nasa-red)] hover:bg-[var(--nasa-red-dark)] text-white rounded-sm transition-colors"
                           >
                             {result ? "Retry" : "Launch"}
                           </a>

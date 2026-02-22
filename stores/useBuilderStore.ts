@@ -1,13 +1,16 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type {
   Stage,
   Payload,
   RocketConfig,
   EngineConfig,
   FuelType,
+  FuelTankDef,
   StageSpec,
 } from "@/types/rocket";
 import { getEngineById } from "@/engine/data/engines";
+import { getFuelTankById } from "@/engine/data/parts";
 import { deltaV, thrustToWeightRatio, totalDeltaV } from "@/engine/physics/tsiolkovsky";
 import { G0 } from "@/engine/physics/constants";
 
@@ -28,6 +31,8 @@ interface BuilderState {
   reorderStages: (from: number, to: number) => void;
   setEngine: (stageIndex: number, engineId: string, count: number) => void;
   setFuel: (stageIndex: number, fuelType: FuelType, massKg: number) => void;
+  addFuelTank: (stageIndex: number, tank: FuelTankDef) => void;
+  removeFuelTank: (stageIndex: number, tankIndex: number) => void;
   addPart: (stageIndex: number, partId: string) => void;
   removePart: (stageIndex: number, partIndex: number) => void;
   setFuelMass: (stageIndex: number, fuelMass: number) => void;
@@ -44,7 +49,9 @@ interface BuilderState {
   getRocketConfig: () => RocketConfig;
 }
 
-export const useBuilderStore = create<BuilderState>((set, get) => ({
+export const useBuilderStore = create<BuilderState>()(
+  persist(
+    (set, get) => ({
   missionId: "",
   stages: [],
   payload: { name: "Payload", mass: 0 },
@@ -63,7 +70,10 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
           engines: [],
           fuelType: "kerosene_lox",
           fuelMass: 0,
+          fuelCapacity: 0,
           structuralMass: 0,
+          partsCost: 0,
+          tanks: [],
           parts: [],
         },
       ],
@@ -113,6 +123,48 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
         ...newStages[stageIndex],
         fuelType,
         fuelMass: massKg,
+      };
+      return { stages: newStages };
+    });
+  },
+
+  addFuelTank: (stageIndex: number, tank: FuelTankDef) => {
+    set((state) => {
+      const newStages = [...state.stages];
+      const stage = newStages[stageIndex];
+      const newCapacity = stage.fuelCapacity + tank.fuelCapacity;
+      newStages[stageIndex] = {
+        ...stage,
+        fuelType: tank.fuelType,
+        fuelMass: newCapacity, // Auto-fill to full capacity
+        fuelCapacity: newCapacity,
+        structuralMass: stage.structuralMass + tank.dryMass,
+        partsCost: stage.partsCost + tank.cost,
+        tanks: [...stage.tanks, tank.id],
+      };
+      return { stages: newStages };
+    });
+  },
+
+  removeFuelTank: (stageIndex: number, tankIndex: number) => {
+    set((state) => {
+      const newStages = [...state.stages];
+      const stage = newStages[stageIndex];
+      const tankId = stage.tanks[tankIndex];
+      const tank = getFuelTankById(tankId);
+      if (!tank) return { stages: newStages };
+
+      const newTanks = [...stage.tanks];
+      newTanks.splice(tankIndex, 1);
+
+      const newCapacity = stage.fuelCapacity - tank.fuelCapacity;
+      newStages[stageIndex] = {
+        ...stage,
+        tanks: newTanks,
+        fuelCapacity: newCapacity,
+        fuelMass: Math.min(stage.fuelMass, newCapacity),
+        structuralMass: stage.structuralMass - tank.dryMass,
+        partsCost: stage.partsCost - tank.cost,
       };
       return { stages: newStages };
     });
@@ -184,11 +236,11 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
     const { stages } = get();
     let total = 0;
     for (const stage of stages) {
+      total += stage.partsCost;
       for (const ec of stage.engines) {
         const engine = getEngineById(ec.engineId);
         if (engine) total += engine.cost * ec.count;
       }
-      // Fuel cost is simplified as part of engine/tank cost
     }
     return total;
   },
@@ -280,4 +332,31 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
       totalDryMass: get().getTotalDryMass(),
     };
   },
-}));
+}),
+    {
+      name: "builder-store",
+      storage: {
+        getItem: (name) => {
+          if (typeof window === "undefined") return null;
+          const str = sessionStorage.getItem(name);
+          return str ? JSON.parse(str) : null;
+        },
+        setItem: (name, value) => {
+          if (typeof window !== "undefined") {
+            sessionStorage.setItem(name, JSON.stringify(value));
+          }
+        },
+        removeItem: (name) => {
+          if (typeof window !== "undefined") {
+            sessionStorage.removeItem(name);
+          }
+        },
+      },
+      partialize: (state) => ({
+        missionId: state.missionId,
+        stages: state.stages,
+        payload: state.payload,
+      }) as unknown as BuilderState,
+    }
+  )
+);

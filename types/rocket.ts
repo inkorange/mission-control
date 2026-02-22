@@ -12,6 +12,15 @@ export type FuelType =
   | "methane_lox"
   | "xenon";
 
+/** Each engine type burns exactly one fuel type. */
+export const ENGINE_FUEL_MAP: Record<EngineType, FuelType> = {
+  solid: "solid_propellant",
+  liquid_kerolox: "kerosene_lox",
+  liquid_hydrolox: "hydrogen_lox",
+  liquid_methalox: "methane_lox",
+  ion: "xenon",
+};
+
 export type PartCategory = "engine" | "fuel_tank" | "structural" | "fairing" | "adapter";
 
 export interface EngineDef {
@@ -69,8 +78,11 @@ export interface Stage {
   id: string;
   engines: EngineConfig[];
   fuelType: FuelType;
-  fuelMass: number; // kg of fuel loaded
+  fuelMass: number; // kg of fuel currently loaded
+  fuelCapacity: number; // kg max capacity from purchased tanks
   structuralMass: number; // kg (tanks, interstage, etc.)
+  partsCost: number; // cost of fuel tanks and structural parts
+  tanks: string[]; // Fuel tank IDs added to this stage (supports duplicates)
   parts: string[]; // Part IDs for structural components
   fairings?: FairingConfig;
 }
