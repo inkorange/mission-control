@@ -9,7 +9,7 @@ import { useSimulation } from "@/hooks/useSimulation";
 import { ENGINES } from "@/engine/data/engines";
 import TelemetryHUD from "@/components/launch/TelemetryHUD";
 import FlightControls from "@/components/launch/FlightControls";
-import TrajectoryView from "@/components/launch/TrajectoryView";
+import FlightScene3D from "@/components/launch/FlightScene3D";
 import EventLog from "@/components/launch/EventLog";
 import {
   formatDistance,
@@ -46,8 +46,13 @@ export default function LaunchPage({
   const mission = getMissionById(missionId);
   const getRocketConfig = useBuilderStore((s) => s.getRocketConfig);
   const rocketConfig = getRocketConfig();
-  const { isPaused, currentSnapshot, result, timeScale } =
+  const { isPaused, currentSnapshot, result, timeScale, reset: resetFlight } =
     useFlightStore();
+
+  // Reset flight state when entering the launch page so previous results don't persist
+  useEffect(() => {
+    resetFlight();
+  }, [resetFlight]);
 
   const [launchPhase, setLaunchPhase] = useState<"idle" | "countdown" | "flight">("idle");
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -150,10 +155,10 @@ export default function LaunchPage({
           : { label: "Pre-Launch", color: "var(--nasa-blue-light)", dot: "info" };
 
   return (
-    <div className="h-[calc(100vh-61px)] flex flex-col">
+    <div className="h-[calc(100vh-84px)] flex flex-col">
       {/* Flight HUD header */}
       <div className="border-b border-[var(--border)] bg-[var(--surface)]">
-        <div className="px-6 py-2 flex items-center justify-between">
+        <div className="px-6 py-5 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <span className="font-mono text-[0.7rem] tracking-[0.2em] uppercase text-[var(--nasa-blue-light)]">
               {mission.codename}
@@ -225,7 +230,7 @@ export default function LaunchPage({
       <div className="flex-1 flex overflow-hidden">
         {/* Center: Trajectory visualization */}
         <div className="flex-1 relative">
-          <TrajectoryView targetOrbit={mission.requirements.targetOrbit} />
+          <FlightScene3D targetOrbit={mission.requirements.targetOrbit} />
 
           {/* Pre-launch overlay */}
           {launchPhase !== "flight" && (
@@ -310,13 +315,14 @@ export default function LaunchPage({
             </div>
           )}
 
-          {/* Post-flight overlay */}
+          {/* Post-flight result modal */}
           {result && (
-            <div className="absolute bottom-0 left-0 right-0 p-4 z-10">
-              <div className="panel p-4 max-w-md mx-auto">
-                <div className="flex items-center justify-between mb-3">
+            <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/50 animate-fade-in">
+              <div className="panel p-6 max-w-lg w-full mx-4 animate-scale-in">
+                {/* Outcome header */}
+                <div className="text-center mb-5">
                   <span
-                    className={`font-mono text-[0.75rem] tracking-[0.15em] uppercase font-bold ${
+                    className={`font-mono text-[1rem] tracking-[0.2em] uppercase font-bold block ${
                       result.outcome === "mission_complete" ||
                       result.outcome === "orbit_achieved"
                         ? "text-[var(--nasa-green)]"
@@ -335,43 +341,48 @@ export default function LaunchPage({
                               ? "Suborbital Only"
                               : "Fuel Exhausted"}
                   </span>
+                  <div className="nasa-stripe mt-3" />
                 </div>
-                <div className="grid grid-cols-3 gap-2 mb-3">
-                  <div>
-                    <span className="font-mono text-[0.5625rem] tracking-wider uppercase text-[var(--muted)] block">
-                      Max Alt
+
+                {/* Stats grid */}
+                <div className="grid grid-cols-3 gap-3 mb-5">
+                  <div className="p-3 rounded-sm border border-[var(--border)] bg-black/20 text-center">
+                    <span className="font-mono text-[0.6rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1">
+                      Max Altitude
                     </span>
-                    <span className="font-mono text-[0.75rem] text-[var(--data)]">
+                    <span className="font-mono text-base text-[var(--data)]">
                       {formatDistance(result.maxAltitude)}
                     </span>
                   </div>
-                  <div>
-                    <span className="font-mono text-[0.5625rem] tracking-wider uppercase text-[var(--muted)] block">
+                  <div className="p-3 rounded-sm border border-[var(--border)] bg-black/20 text-center">
+                    <span className="font-mono text-[0.6rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1">
                       Duration
                     </span>
-                    <span className="font-mono text-[0.75rem] text-[var(--data)]">
+                    <span className="font-mono text-base text-[var(--data)]">
                       {formatMissionTime(result.flightDuration)}
                     </span>
                   </div>
-                  <div>
-                    <span className="font-mono text-[0.5625rem] tracking-wider uppercase text-[var(--muted)] block">
-                      Dv Used
+                  <div className="p-3 rounded-sm border border-[var(--border)] bg-black/20 text-center">
+                    <span className="font-mono text-[0.6rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1">
+                      Delta-V Used
                     </span>
-                    <span className="font-mono text-[0.75rem] text-[var(--data)]">
+                    <span className="font-mono text-base text-[var(--data)]">
                       {result.totalDeltaVUsed.toFixed(0)} m/s
                     </span>
                   </div>
                 </div>
+
+                {/* Action buttons */}
                 <div className="flex items-center gap-3">
                   <Link
                     href={`/debrief/${missionId}`}
-                    className="flex-1 text-center font-mono text-[0.75rem] tracking-[0.1em] uppercase py-2 bg-[var(--nasa-red)] hover:bg-[var(--nasa-red-dark)] text-white rounded-sm transition-colors"
+                    className="flex-1 text-center font-mono text-[0.8rem] tracking-[0.1em] uppercase py-2.5 bg-[var(--nasa-red)] hover:bg-[var(--nasa-red-dark)] text-white rounded-sm transition-colors"
                   >
                     Debrief
                   </Link>
                   <Link
                     href={`/builder/${missionId}`}
-                    className="flex-1 text-center font-mono text-[0.75rem] tracking-[0.1em] uppercase py-2 border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 rounded-sm transition-colors"
+                    className="flex-1 text-center font-mono text-[0.8rem] tracking-[0.1em] uppercase py-2.5 border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 rounded-sm transition-colors"
                   >
                     Rebuild
                   </Link>

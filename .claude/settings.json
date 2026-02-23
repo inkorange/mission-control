@@ -2,7 +2,17 @@
   "permissions": {
     "allow": [
       "Bash(npm test:*)",
-      "Bash(npx next build:*)"
+      "Bash(npx next build:*)",
+      "Bash(grep:*)",
+      "Bash(xargs:*)",
+      "Bash(node -e:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(curl:*)"
+    ],
+    "additionalDirectories": [
+      "/Users/christopherwest/web/mission-control/engine",
+      "/Users/christopherwest/web/mission-control/components"
     ]
   }
 }

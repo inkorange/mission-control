@@ -30,11 +30,11 @@ export default function RootLayout({
       >
         <div className="min-h-screen flex flex-col">
           {/* NASA-style header */}
-          <header className="border-b border-[var(--border)] bg-[var(--surface)]">
+          <header className="sticky top-0 z-40 border-b border-[var(--border)] bg-[var(--surface)]/95 backdrop-blur-sm">
             {/* Red accent stripe */}
             <div className="h-[2px] bg-gradient-to-r from-transparent via-[var(--nasa-red)] to-transparent" />
 
-            <div className="px-6 py-3.5 flex items-center justify-between">
+            <div className="px-6 py-6 flex items-center justify-between">
               <div className="flex items-center gap-4">
                 {/* Agency mark */}
                 <div className="flex items-center gap-3">

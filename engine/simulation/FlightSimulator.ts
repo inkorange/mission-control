@@ -2,7 +2,7 @@ import { EARTH_RADIUS, FIXED_DT, DEFAULT_DRAG_COEFFICIENT, DEFAULT_CROSS_SECTION
 import { rk4Step, createLaunchState } from "../physics/trajectory";
 import { massFlowRate } from "../physics/tsiolkovsky";
 import { orbitalElementsFromState, isOrbitStable } from "../physics/orbit";
-import { magnitude, normalize, scale, rotate } from "@/lib/math";
+import { magnitude, normalize, scale, rotate, dot } from "@/lib/math";
 import { degToRad } from "@/lib/math";
 import type { Vector2D, SimState, FlightSnapshot, FlightResult, FlightOutcome, OrbitalElements } from "@/types/physics";
 import type { RocketConfig, EngineDef } from "@/types/rocket";
@@ -42,6 +42,8 @@ export class FlightSimulator {
   private totalDeltaVUsed: number;
   private lastVelocity: number;
   private engineLookup: Map<string, EngineDef>;
+  private suborbitalTargetReached: boolean;
+  private launchAngle: number;
 
   constructor(
     config: RocketConfig,
@@ -115,6 +117,8 @@ export class FlightSimulator {
     this.outcome = null;
     this.totalDeltaVUsed = 0;
     this.lastVelocity = magnitude(this.state.velocity);
+    this.suborbitalTargetReached = false;
+    this.launchAngle = Math.atan2(this.state.position.y, this.state.position.x);
 
     this.events.push({
       time: 0,
@@ -309,20 +313,32 @@ export class FlightSimulator {
     }
 
     // Suborbital mission check: if the mission only requires reaching an altitude
-    // (periapsis.min is -Infinity), check altitude directly without requiring a stable orbit
+    // (periapsis.min is -Infinity), mark success when altitude is reached but let the
+    // rocket coast to apoapsis so the full ballistic arc is captured in the flight data.
     if (this.mission.requirements.targetOrbit) {
       const target = this.mission.requirements.targetOrbit;
       const isSuborbitalMission = target.periapsis.min === -Infinity;
 
-      if (isSuborbitalMission && this.state.altitude >= target.apoapsis.min) {
-        this.outcome = "mission_complete";
-        this.isRunning = false;
+      if (isSuborbitalMission && !this.suborbitalTargetReached && this.state.altitude >= target.apoapsis.min) {
+        this.suborbitalTargetReached = true;
         this.events.push({
           time: this.state.time,
           type: "orbit_achieved",
           description: `Altitude ${(this.state.altitude / 1000).toFixed(0)}km reached — mission complete!`,
         });
-        return;
+      }
+
+      // End suborbital flight once past apoapsis (radial velocity becomes negative).
+      // Return either way to prevent the fuel-exhaustion check from stopping the sim
+      // at exactly 100km (a suborbital trajectory always has periapsis < 0).
+      if (isSuborbitalMission && this.suborbitalTargetReached) {
+        const radialDir = normalize(this.state.position);
+        const radialVelocity = dot(radialDir, this.state.velocity);
+        if (radialVelocity < 0) {
+          this.outcome = "mission_complete";
+          this.isRunning = false;
+        }
+        return; // Always return — coast to apoapsis, skip other termination checks
       }
     }
 
@@ -398,11 +414,16 @@ export class FlightSimulator {
       );
     }
 
+    // Downrange: arc length along Earth's surface from launch point
+    const currentAngle = Math.atan2(this.state.position.y, this.state.position.x);
+    const angleTraveled = currentAngle - this.launchAngle;
+    const downrangeDistance = Math.abs(angleTraveled) * EARTH_RADIUS;
+
     this.history.push({
       time: this.state.time,
       altitude: this.state.altitude,
       velocity: magnitude(this.state.velocity),
-      downrangeDistance: 0, // Simplified for now
+      downrangeDistance,
       mass: this.state.mass,
       fuel: this.state.fuel,
       currentStage: this.currentStageIndex,

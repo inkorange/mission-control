@@ -8,7 +8,7 @@ import { getEngineById } from "@/engine/data/engines";
 import PartsPanel from "@/components/builder/PartsPanel";
 import StageEditor from "@/components/builder/StageEditor";
 import StatsPanel from "@/components/builder/StatsPanel";
-import RocketPreview from "@/components/builder/RocketPreview";
+import RocketPreview3D from "@/components/builder/RocketPreview3D";
 import { formatCost } from "@/lib/formatters";
 import type { EngineDef, FuelTankDef, FuelType } from "@/types/rocket";
 import { ENGINE_FUEL_MAP } from "@/types/rocket";
@@ -117,10 +117,10 @@ export default function BuilderPage({
   const isReady = stages.length > 0 && hasEngines && hasFuel && twrOk && !overBudget;
 
   return (
-    <div className="h-[calc(100vh-61px)] flex flex-col">
+    <div className="h-[calc(100vh-84px)] flex flex-col">
       {/* Mission subheader */}
       <div className="border-b border-[var(--border)] bg-[var(--surface)]">
-        <div className="px-6 py-2.5 flex items-center justify-between">
+        <div className="px-6 py-5 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <span className="font-mono text-[0.7rem] tracking-[0.2em] uppercase text-[var(--nasa-blue-light)]">
               {mission.codename}
@@ -324,11 +324,11 @@ export default function BuilderPage({
         </div>
 
         {/* Right: Preview + Stats */}
-        <div className="w-72 border-l border-[var(--border)] flex-shrink-0 flex flex-col">
-          <div className="h-1/2 border-b border-[var(--border)]">
-            <RocketPreview />
+        <div className="w-96 border-l border-[var(--border)] flex-shrink-0 flex flex-col">
+          <div className="h-3/5 border-b border-[var(--border)]">
+            <RocketPreview3D />
           </div>
-          <div className="h-1/2">
+          <div className="h-2/5 overflow-y-auto">
             <StatsPanel budget={mission.budget} />
           </div>
         </div>

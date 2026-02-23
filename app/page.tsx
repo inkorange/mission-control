@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useProgressionStore } from "@/stores/useProgressionStore";
 import { MISSIONS } from "@/engine/data/missions";
 import { getStarsRequiredForTier } from "@/engine/data/missions";
-import type { MissionTier } from "@/types/mission";
+import MissionBriefModal from "@/components/MissionBriefModal";
+import EarthBackground from "@/components/three/EarthBackground";
+import type { Mission, MissionTier } from "@/types/mission";
 
 const TIER_NAMES: Record<number, string> = {
   1: "Foundations",
@@ -31,6 +33,7 @@ export default function MissionSelect() {
     getTierStars,
     totalStars,
   } = useProgressionStore();
+  const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
 
   useEffect(() => {
     loadProgress();
@@ -52,14 +55,9 @@ export default function MissionSelect() {
   const tiers = [1, 2, 3, 4, 5] as MissionTier[];
 
   return (
-    <div className="relative min-h-[calc(100vh-61px)]">
-      {/* Background image — launch photo */}
-      <div
-        className="fixed inset-0 top-[61px] bg-cover bg-center bg-no-repeat"
-        style={{ backgroundImage: "url('/background.jpg')" }}
-      />
-      {/* Dark overlay for readability */}
-      <div className="fixed inset-0 top-[61px] bg-[var(--nasa-dark)]/75" />
+    <div className="relative min-h-[calc(100vh-84px)]">
+      {/* 3D Earth background */}
+      <EarthBackground />
 
       <div className="relative z-10 max-w-6xl mx-auto px-6 py-8">
       {/* Page header */}
@@ -95,7 +93,7 @@ export default function MissionSelect() {
         return (
           <div key={tier} className="mb-8">
             {/* Tier header panel */}
-            <div className="panel mb-4">
+            <div className="panel-glass mb-4">
               <div className="flex items-center justify-between px-4 py-3">
                 <div className="flex items-center gap-3">
                   <span
@@ -153,7 +151,7 @@ export default function MissionSelect() {
 
             {/* Mission cards grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {tierMissions.map((mission) => {
+              {tierMissions.map((mission, missionIdx) => {
                 const result = missionResults[mission.id];
                 const isUnlocked = unlocked;
 
@@ -161,16 +159,18 @@ export default function MissionSelect() {
                   <div
                     key={mission.id}
                     className={`
-                      panel transition-all relative overflow-hidden
+                      panel-glass transition-all relative animate-slide-up
                       ${isUnlocked
-                        ? "hover:border-[var(--nasa-red)]/40 cursor-pointer group"
+                        ? "hover:border-[var(--nasa-red)]/40 hover:-translate-y-0.5 cursor-pointer group"
                         : "opacity-30 cursor-not-allowed"
                       }
                     `}
+                    style={{ animationDelay: `${missionIdx * 50}ms` }}
+                    onClick={() => isUnlocked && setSelectedMission(mission)}
                   >
                     {/* Top accent on hover */}
                     {isUnlocked && (
-                      <div className="absolute top-0 left-0 right-0 h-[2px] bg-[var(--nasa-red)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <div className="absolute top-0 left-0 right-0 h-[2px] bg-[var(--nasa-red)] opacity-0 group-hover:opacity-100 transition-opacity rounded-t-[4px]" />
                     )}
 
                     <div className="p-4">
@@ -227,12 +227,11 @@ export default function MissionSelect() {
                           )}
                         </div>
                         {isUnlocked && (
-                          <a
-                            href={`/builder/${mission.id}`}
-                            className="font-mono text-[0.75rem] tracking-[0.1em] uppercase px-3 py-1.5 bg-[var(--nasa-red)] hover:bg-[var(--nasa-red-dark)] text-white rounded-sm transition-colors"
+                          <span
+                            className="font-mono text-[0.75rem] tracking-[0.1em] uppercase px-3 py-1.5 bg-[var(--nasa-red)] group-hover:bg-[var(--nasa-red-dark)] text-white rounded-sm transition-colors"
                           >
                             {result ? "Retry" : "Launch"}
-                          </a>
+                          </span>
                         )}
                       </div>
                     </div>
@@ -244,6 +243,15 @@ export default function MissionSelect() {
         );
       })}
       </div>
+
+      {/* Mission brief modal */}
+      {selectedMission && (
+        <MissionBriefModal
+          mission={selectedMission}
+          previousResult={missionResults[selectedMission.id]}
+          onClose={() => setSelectedMission(null)}
+        />
+      )}
     </div>
   );
 }

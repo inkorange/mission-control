@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useFlightStore } from "@/stores/useFlightStore";
 
 interface FlightControlsProps {
@@ -40,6 +40,51 @@ export default function FlightControls({
 
   const canStage = currentStage < stageCount - 1;
 
+  // Keyboard shortcuts
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      // Don't capture when typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      switch (e.key.toLowerCase()) {
+        case " ":
+          e.preventDefault();
+          isPaused ? resume() : pause();
+          break;
+        case "z":
+          handleThrottleChange(Math.max(0, throttle - 10));
+          break;
+        case "x":
+          handleThrottleChange(Math.min(100, throttle + 10));
+          break;
+        case "s":
+          if (canStage) onStaging();
+          break;
+        case "1":
+          onWarpChange(1);
+          break;
+        case "2":
+          onWarpChange(5);
+          break;
+        case "3":
+          onWarpChange(10);
+          break;
+        case "4":
+          onWarpChange(50);
+          break;
+        case "5":
+          onWarpChange(100);
+          break;
+      }
+    },
+    [isPaused, pause, resume, throttle, canStage, onStaging, onWarpChange, handleThrottleChange]
+  );
+
+  useEffect(() => {
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
+
   return (
     <div className="space-y-3">
       {/* Throttle */}
@@ -59,9 +104,11 @@ export default function FlightControls({
           step={5}
           value={throttle}
           onChange={(e) => handleThrottleChange(Number(e.target.value))}
-          className="w-full h-1.5 appearance-none bg-[var(--border)] rounded-full cursor-pointer
-            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[var(--nasa-red)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer
-            [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:bg-[var(--nasa-red)] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer"
+          className="slider-filled"
+          style={{
+            '--fill': `${throttle}%`,
+            '--slider-color': 'var(--nasa-red)',
+          } as React.CSSProperties}
         />
         <div className="flex justify-between mt-0.5">
           <button
@@ -96,9 +143,11 @@ export default function FlightControls({
           step={1}
           value={pitch}
           onChange={(e) => handlePitchChange(Number(e.target.value))}
-          className="w-full h-1.5 appearance-none bg-[var(--border)] rounded-full cursor-pointer
-            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[var(--nasa-blue-light)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer
-            [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:bg-[var(--nasa-blue-light)] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer"
+          className="slider-filled"
+          style={{
+            '--fill': `${(pitch / 90) * 100}%`,
+            '--slider-color': 'var(--nasa-blue-light)',
+          } as React.CSSProperties}
         />
         <div className="flex justify-between mt-0.5">
           <span className="font-mono text-[0.55rem] text-[var(--muted)]">
@@ -162,6 +211,13 @@ export default function FlightControls({
         >
           Abort Mission
         </button>
+      </div>
+
+      {/* Keyboard shortcuts hint */}
+      <div className="pt-2 border-t border-[var(--border)]">
+        <p className="font-mono text-[0.5rem] tracking-wider text-[var(--muted)]/60 leading-relaxed">
+          SPC=Pause &middot; Z/X=Throttle &middot; S=Stage &middot; 1-5=Warp
+        </p>
       </div>
     </div>
   );

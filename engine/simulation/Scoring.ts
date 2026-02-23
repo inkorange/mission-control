@@ -1,5 +1,5 @@
 import type { FlightResult } from "@/types/physics";
-import type { Mission, OrbitalTarget } from "@/types/mission";
+import type { Mission } from "@/types/mission";
 import type { ScoreBreakdown, StarRating } from "@/types/scoring";
 import { hohmannDeltaV } from "../physics/orbit";
 import { EARTH_RADIUS } from "../physics/constants";
@@ -18,7 +18,17 @@ function optimalDeltaV(mission: Mission): number {
   // LEO insertion ≈ 9,400 m/s (including gravity + drag losses)
   const leoInsertionDv = 9400;
 
-  // Mid-point of target orbit
+  // Suborbital missions (periapsis is -Infinity) — just need to reach altitude
+  // Approximate dv for a vertical sounding rocket to reach target apoapsis
+  const isSuborbital = !isFinite(target.periapsis.min) || !isFinite(target.periapsis.max);
+  if (isSuborbital) {
+    // For a suborbital hop, approximate dv ≈ sqrt(2 * g * h) + drag losses (~15%)
+    const targetApo = isFinite(target.apoapsis.min) ? target.apoapsis.min : 100_000;
+    const dv = Math.sqrt(2 * 9.80665 * targetApo) * 1.15;
+    return dv;
+  }
+
+  // Mid-point of target orbit (safe now — no Infinity values)
   const targetPeri = (target.periapsis.min + target.periapsis.max) / 2;
   const targetApo = (target.apoapsis.min + target.apoapsis.max) / 2;
   const targetR = EARTH_RADIUS + (targetPeri + targetApo) / 2;
@@ -58,17 +68,26 @@ export function scoreFlightResult(
   let accuracyScore = 0;
   if (mission.requirements.targetOrbit && flight.finalOrbit) {
     const target = mission.requirements.targetOrbit;
-    const targetPeriMid = (target.periapsis.min + target.periapsis.max) / 2;
-    const targetApoMid = (target.apoapsis.min + target.apoapsis.max) / 2;
+    const isSuborbital = !isFinite(target.periapsis.min) || !isFinite(target.periapsis.max);
 
-    const periError = Math.abs(flight.finalOrbit.periapsis - targetPeriMid);
-    const apoError = Math.abs(flight.finalOrbit.apoapsis - targetApoMid);
-    const avgError = (periError + apoError) / 2;
+    if (isSuborbital) {
+      // For suborbital missions, score based on how well apoapsis was reached
+      const targetApo = isFinite(target.apoapsis.min) ? target.apoapsis.min : 100_000;
+      const apoRatio = Math.min(1, flight.maxAltitude / targetApo);
+      accuracyScore = Math.round(apoRatio * 100);
+    } else {
+      const targetPeriMid = (target.periapsis.min + target.periapsis.max) / 2;
+      const targetApoMid = (target.apoapsis.min + target.apoapsis.max) / 2;
 
-    // Tolerance: within 10km = 100%, scaled down from there
-    const tolerance = 10_000; // 10km
-    const errorRatio = 1 - Math.min(1, avgError / (tolerance * 10));
-    accuracyScore = Math.round(clamp(errorRatio * 100, 0, 100));
+      const periError = Math.abs(flight.finalOrbit.periapsis - targetPeriMid);
+      const apoError = Math.abs(flight.finalOrbit.apoapsis - targetApoMid);
+      const avgError = (periError + apoError) / 2;
+
+      // Tolerance: within 10km = 100%, scaled down from there
+      const tolerance = 10_000; // 10km
+      const errorRatio = 1 - Math.min(1, avgError / (tolerance * 10));
+      accuracyScore = Math.round(clamp(errorRatio * 100, 0, 100));
+    }
   } else if (flight.outcome === "orbit_achieved" || flight.outcome === "mission_complete") {
     accuracyScore = 75; // Partial credit for achieving any orbit
   }
@@ -100,11 +119,10 @@ export function scoreFlightResult(
     },
     accuracy: {
       score: accuracyScore,
-      orbitalDeviation: flight.finalOrbit
-        ? Math.abs(
-            flight.finalOrbit.periapsis -
-              (mission.requirements.targetOrbit?.periapsis.min ?? 0)
-          )
+      orbitalDeviation: flight.finalOrbit && mission.requirements.targetOrbit
+        ? isFinite(mission.requirements.targetOrbit.periapsis.min)
+          ? Math.abs(flight.finalOrbit.periapsis - mission.requirements.targetOrbit.periapsis.min)
+          : Math.abs(flight.maxAltitude - (mission.requirements.targetOrbit.apoapsis.min ?? 0))
         : Infinity,
       inclinationError: 0, // 2D sim — always 0
     },

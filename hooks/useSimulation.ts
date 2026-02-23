@@ -3,6 +3,9 @@
 import { useRef, useCallback, useEffect } from "react";
 import { FlightSimulator } from "@/engine/simulation/FlightSimulator";
 import { useFlightStore } from "@/stores/useFlightStore";
+import { useProgressionStore } from "@/stores/useProgressionStore";
+import { calculateMissionResult } from "@/engine/simulation/calculateMissionResult";
+import type { FlightResult } from "@/types/physics";
 import type { RocketConfig } from "@/types/rocket";
 import type { Mission } from "@/types/mission";
 import type { EngineDef } from "@/types/rocket";
@@ -29,6 +32,19 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
     endFlight,
     reset,
   } = useFlightStore();
+
+  // Use ref for progression to avoid re-creating callbacks when store updates
+  const completeMissionRef = useRef(useProgressionStore.getState().completeMission);
+  useEffect(() => {
+    completeMissionRef.current = useProgressionStore.getState().completeMission;
+  });
+
+  // Save flight result to progression store
+  const saveToProgression = useCallback((flightResult: FlightResult) => {
+    if (!mission) return;
+    const missionResult = calculateMissionResult(flightResult, mission, config);
+    completeMissionRef.current(missionResult);
+  }, [mission, config]);
 
   // Create simulator instance (stable across renders)
   const getSimulator = useCallback(() => {
@@ -66,14 +82,16 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
 
         // Check if sim ended
         if (!sim.running) {
-          endFlight(sim.getResult());
+          const result = sim.getResult();
+          endFlight(result);
+          saveToProgression(result);
           return;
         }
       }
 
       rafRef.current = requestAnimationFrame(loop);
     },
-    [updateSnapshot, updateOrbit, setEvents, endFlight]
+    [updateSnapshot, updateOrbit, setEvents, endFlight, saveToProgression]
   );
 
   // Start the simulation
@@ -107,9 +125,11 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
     simRef.current?.abort();
     const sim = simRef.current;
     if (sim) {
-      endFlight(sim.getResult());
+      const result = sim.getResult();
+      endFlight(result);
+      saveToProgression(result);
     }
-  }, [endFlight]);
+  }, [endFlight, saveToProgression]);
 
   // Time warp
   const setWarp = useCallback(

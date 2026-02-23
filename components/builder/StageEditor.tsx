@@ -190,9 +190,11 @@ export default function StageEditor({
               step={Math.max(100, Math.round(stage.fuelCapacity / 100) * 100 / 100)}
               value={stage.fuelMass}
               onChange={(e) => setFuelMass(stageIndex, Number(e.target.value))}
-              className="w-full h-1.5 appearance-none bg-[var(--border)] rounded-full cursor-pointer
-                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-[var(--nasa-red)] [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer
-                [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:bg-[var(--nasa-red)] [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:cursor-pointer"
+              className="slider-filled"
+              style={{
+                '--fill': `${(stage.fuelMass / stage.fuelCapacity) * 100}%`,
+                '--slider-color': 'var(--nasa-blue-light)',
+              } as React.CSSProperties}
             />
             <div className="flex justify-between mt-0.5">
               <span className="font-mono text-[0.55rem] text-[var(--muted)]">Empty</span>
