@@ -28,7 +28,7 @@ function Scene() {
  */
 export default function EarthBackground() {
   return (
-    <div className="fixed inset-0 top-[84px] z-0">
+    <div className="earth-bg-active fixed inset-0 top-[84px] z-0">
       <Canvas
         camera={{ position: [0, 0, 4], fov: 50 }}
         gl={{ antialias: true, alpha: false }}
@@ -40,7 +40,7 @@ export default function EarthBackground() {
         </Suspense>
       </Canvas>
       {/* Subtle dark overlay — kept light so backdrop-filter on cards can blur the 3D scene */}
-      <div className="absolute inset-0 bg-black/20 pointer-events-none" />
+      <div className="absolute inset-0 bg-black/10 pointer-events-none" />
     </div>
   );
 }

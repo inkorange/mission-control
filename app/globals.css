@@ -76,6 +76,11 @@ body > * {
   z-index: 1;
 }
 
+/* Hide grid overlay on pages with 3D backgrounds so backdrop-filter works */
+body:has(.earth-bg-active)::before {
+  display: none;
+}
+
 /* NASA-style label typography */
 .label-nasa {
   font-family: var(--font-mono);
@@ -128,11 +133,24 @@ body > * {
 
 /* Frosted glass panel — for use over 3D / image backgrounds */
 .panel-glass {
-  background: rgba(0, 0, 0, 0.5);
-  border: 1px solid rgba(26, 39, 68, 0.5);
-  border-radius: 4px;
-  backdrop-filter: blur(32px) saturate(1.4);
-  -webkit-backdrop-filter: blur(32px) saturate(1.4);
+  background: rgba(6, 13, 31, 0.45);
+  border: 1px solid rgba(77, 143, 234, 0.15);
+  border-radius: 6px;
+  -webkit-backdrop-filter: blur(40px);
+  backdrop-filter: blur(40px) saturate(1.6);
+  color: #e6e8ec;
+}
+.panel-glass .text-\[var\(--muted\)\],
+.panel-glass [class*="text-[var(--muted)"] {
+  color: #9da7be !important;
+}
+.panel-glass .font-semibold,
+.panel-glass h3,
+.panel-glass h4 {
+  color: #f0f1f4;
+}
+.panel-glass .font-mono {
+  color: #cdd2dc;
 }
 
 /* Thin red accent line (NASA chevron stripe) */
