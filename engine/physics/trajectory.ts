@@ -1,7 +1,13 @@
 import { EARTH_MU, EARTH_RADIUS } from "./constants";
 import { atmosphericDensity } from "./atmosphere";
 import type { Vector2D, SimState } from "@/types/physics";
-import { add, scale, magnitude, normalize, dot } from "@/lib/math";
+import { add, sub, scale, magnitude, normalize } from "@/lib/math";
+
+/** Gravitational body for N-body computation — position in Earth-centered frame. */
+export interface GravBody {
+  mu: number;
+  position: Vector2D;
+}
 
 interface Derivatives {
   dPos: Vector2D;
@@ -9,7 +15,7 @@ interface Derivatives {
 }
 
 /**
- * Compute acceleration from all forces: gravity, thrust, drag.
+ * Compute acceleration from all forces: N-body gravity, thrust, drag.
  */
 function computeAcceleration(
   position: Vector2D,
@@ -17,31 +23,41 @@ function computeAcceleration(
   mass: number,
   thrust: Vector2D,
   dragCoeff: number,
-  crossSection: number
+  crossSection: number,
+  extraBodies: GravBody[]
 ): Vector2D {
   const r = magnitude(position);
   if (r === 0 || mass <= 0) return { x: 0, y: 0 };
 
-  // Gravity: pointing toward Earth center
+  // Earth gravity: body at origin
   const gMag = EARTH_MU / (r * r);
   const gravDir = normalize(position);
-  const gravity: Vector2D = scale(gravDir, -gMag);
+  let totalAccel: Vector2D = scale(gravDir, -gMag);
 
-  // Drag: opposing velocity direction
+  // N-body: gravity from other celestial bodies
+  for (const body of extraBodies) {
+    const toBody = sub(position, body.position); // vector from body to spacecraft
+    const dist = magnitude(toBody);
+    if (dist < 1) continue; // avoid singularity
+    const bodyGMag = body.mu / (dist * dist);
+    const bodyGravDir = normalize(toBody);
+    totalAccel = add(totalAccel, scale(bodyGravDir, -bodyGMag));
+  }
+
+  // Drag: opposing velocity direction (Earth atmosphere only)
   const altitude = r - EARTH_RADIUS;
   const speed = magnitude(velocity);
-  let drag: Vector2D = { x: 0, y: 0 };
-  if (speed > 0 && altitude < 100_000) {
+  if (speed > 0 && altitude > 0 && altitude < 100_000) {
     const rho = atmosphericDensity(altitude);
     const dragMag = (0.5 * rho * speed * speed * dragCoeff * crossSection) / mass;
     const velDir = normalize(velocity);
-    drag = scale(velDir, -dragMag);
+    totalAccel = add(totalAccel, scale(velDir, -dragMag));
   }
 
   // Thrust acceleration
   const thrustAccel = scale(thrust, 1 / mass);
 
-  return add(add(gravity, drag), thrustAccel);
+  return add(totalAccel, thrustAccel);
 }
 
 function stateDerivatives(
@@ -50,7 +66,8 @@ function stateDerivatives(
   mass: number,
   thrust: Vector2D,
   dragCoeff: number,
-  crossSection: number
+  crossSection: number,
+  extraBodies: GravBody[]
 ): Derivatives {
   const accel = computeAcceleration(
     position,
@@ -58,7 +75,8 @@ function stateDerivatives(
     mass,
     thrust,
     dragCoeff,
-    crossSection
+    crossSection,
+    extraBodies
   );
   return { dPos: velocity, dVel: accel };
 }
@@ -67,13 +85,14 @@ function stateDerivatives(
  * 4th-order Runge-Kutta integration step.
  *
  * Propagates the simulation state forward by dt seconds, accounting for
- * gravity, atmospheric drag, and thrust.
+ * N-body gravity, atmospheric drag, and thrust.
  *
  * @param state - Current simulation state
  * @param dt - Timestep in seconds
  * @param thrust - Thrust vector in Newtons (world frame)
  * @param dragCoeff - Drag coefficient
  * @param crossSection - Cross-sectional area (m²)
+ * @param extraBodies - Additional gravitational bodies (Moon, Mars, etc.)
  * @returns Updated simulation state
  */
 export function rk4Step(
@@ -81,27 +100,28 @@ export function rk4Step(
   dt: number,
   thrust: Vector2D,
   dragCoeff: number,
-  crossSection: number
+  crossSection: number,
+  extraBodies: GravBody[] = []
 ): SimState {
   const { position, velocity, mass } = state;
 
   // k1
-  const k1 = stateDerivatives(position, velocity, mass, thrust, dragCoeff, crossSection);
+  const k1 = stateDerivatives(position, velocity, mass, thrust, dragCoeff, crossSection, extraBodies);
 
   // k2
   const pos2 = add(position, scale(k1.dPos, dt / 2));
   const vel2 = add(velocity, scale(k1.dVel, dt / 2));
-  const k2 = stateDerivatives(pos2, vel2, mass, thrust, dragCoeff, crossSection);
+  const k2 = stateDerivatives(pos2, vel2, mass, thrust, dragCoeff, crossSection, extraBodies);
 
   // k3
   const pos3 = add(position, scale(k2.dPos, dt / 2));
   const vel3 = add(velocity, scale(k2.dVel, dt / 2));
-  const k3 = stateDerivatives(pos3, vel3, mass, thrust, dragCoeff, crossSection);
+  const k3 = stateDerivatives(pos3, vel3, mass, thrust, dragCoeff, crossSection, extraBodies);
 
   // k4
   const pos4 = add(position, scale(k3.dPos, dt));
   const vel4 = add(velocity, scale(k3.dVel, dt));
-  const k4 = stateDerivatives(pos4, vel4, mass, thrust, dragCoeff, crossSection);
+  const k4 = stateDerivatives(pos4, vel4, mass, thrust, dragCoeff, crossSection, extraBodies);
 
   // Combine: y_{n+1} = y_n + (dt/6)(k1 + 2k2 + 2k3 + k4)
   const newPosition = add(
@@ -129,6 +149,7 @@ export function rk4Step(
     time: state.time + dt,
     altitude: newAltitude,
     fuel: state.fuel,
+    closestApproach: state.closestApproach,
   };
 }
 
@@ -144,5 +165,6 @@ export function createLaunchState(totalMass: number, fuelMass: number): SimState
     time: 0,
     altitude: 0,
     fuel: fuelMass,
+    closestApproach: {},
   };
 }

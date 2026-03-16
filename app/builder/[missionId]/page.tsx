@@ -22,6 +22,7 @@ export default function BuilderPage({
   const mission = getMissionById(missionId);
 
   const {
+    missionId: storedMissionId,
     stages,
     payload,
     setMission,
@@ -35,15 +36,15 @@ export default function BuilderPage({
 
   const [selectedStageIndex, setSelectedStageIndex] = useState<number>(0);
 
-  // Initialize builder with mission data
+  // Initialize builder with mission data — only reset if switching to a different mission
   useEffect(() => {
-    if (mission) {
+    if (mission && storedMissionId !== missionId) {
       setMission(missionId, {
         name: mission.codename,
         mass: mission.requirements.minPayloadMass ?? 0,
       });
     }
-  }, [missionId, mission, setMission]);
+  }, [missionId, mission, storedMissionId, setMission]);
 
   if (!mission) {
     return (

@@ -13,7 +13,10 @@ export function calculateMissionResult(
   rocketConfig: RocketConfig
 ): MissionResult {
   const isSuccess =
-    flight.outcome === "mission_complete" || flight.outcome === "orbit_achieved";
+    flight.outcome === "mission_complete" ||
+    flight.outcome === "orbit_achieved" ||
+    flight.outcome === "target_reached" ||
+    flight.outcome === "escaped";
 
   // Score the flight
   const score = scoreFlightResult(flight, mission, rocketConfig.totalCost);

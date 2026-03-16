@@ -1,48 +1,66 @@
 import { EARTH_MU, EARTH_RADIUS } from "./constants";
 import type { Vector2D, OrbitalElements, HohmannTransfer } from "@/types/physics";
-import { magnitude, dot, cross2D } from "@/lib/math";
+import { magnitude, dot, cross2D, sub } from "@/lib/math";
 
 /**
  * Compute orbital elements from position and velocity state vectors.
  * Uses the vis-viva equation and eccentricity vector.
  *
- * @param position - Position from Earth center (meters)
- * @param velocity - Velocity (m/s)
+ * Generalized: pass optional mu and bodyCenter/bodyVelocity/bodyRadius
+ * to compute elements relative to any body (Moon, Mars, etc.).
+ *
+ * @param position - Position in Earth-centered frame (meters)
+ * @param velocity - Velocity in Earth-centered frame (m/s)
+ * @param options - Optional: mu, bodyCenter, bodyVelocity, bodyRadius, bodyId
  * @returns Keplerian orbital elements
  */
 export function orbitalElementsFromState(
   position: Vector2D,
-  velocity: Vector2D
+  velocity: Vector2D,
+  options?: {
+    mu?: number;
+    bodyCenter?: Vector2D;
+    bodyVelocity?: Vector2D;
+    bodyRadius?: number;
+    bodyId?: string;
+  }
 ): OrbitalElements {
-  const r = magnitude(position);
-  const v = magnitude(velocity);
+  const mu = options?.mu ?? EARTH_MU;
+  const bodyRadius = options?.bodyRadius ?? EARTH_RADIUS;
+  const bodyId = options?.bodyId ?? "earth";
+
+  // Compute relative position and velocity
+  const relPos = options?.bodyCenter ? sub(position, options.bodyCenter) : position;
+  const relVel = options?.bodyVelocity ? sub(velocity, options.bodyVelocity) : velocity;
+
+  const r = magnitude(relPos);
+  const v = magnitude(relVel);
 
   // Specific orbital energy: ε = v²/2 - μ/r
-  const energy = (v * v) / 2 - EARTH_MU / r;
+  const energy = (v * v) / 2 - mu / r;
 
   // Semi-major axis: a = -μ / (2ε)
-  // For hyperbolic orbits (energy > 0), a is negative
-  const a = -EARTH_MU / (2 * energy);
+  const a = -mu / (2 * energy);
 
   // Specific angular momentum (scalar for 2D)
-  const h = cross2D(position, velocity);
+  const h = cross2D(relPos, relVel);
 
   // Eccentricity vector
   const eVecX =
-    (v * v * position.x - dot(position, velocity) * velocity.x) / EARTH_MU -
-    position.x / r;
+    (v * v * relPos.x - dot(relPos, relVel) * relVel.x) / mu -
+    relPos.x / r;
   const eVecY =
-    (v * v * position.y - dot(position, velocity) * velocity.y) / EARTH_MU -
-    position.y / r;
+    (v * v * relPos.y - dot(relPos, relVel) * relVel.y) / mu -
+    relPos.y / r;
   const e = Math.sqrt(eVecX * eVecX + eVecY * eVecY);
 
   // Apoapsis and periapsis (above surface)
-  const apoapsis = a * (1 + e) - EARTH_RADIUS;
-  const periapsis = a * (1 - e) - EARTH_RADIUS;
+  const apoapsis = a * (1 + e) - bodyRadius;
+  const periapsis = a * (1 - e) - bodyRadius;
 
   // Period (only meaningful for elliptical orbits)
   const period =
-    a > 0 ? 2 * Math.PI * Math.sqrt((a * a * a) / EARTH_MU) : Infinity;
+    a > 0 ? 2 * Math.PI * Math.sqrt((a * a * a) / mu) : Infinity;
 
   return {
     semiMajorAxis: a,
@@ -51,6 +69,7 @@ export function orbitalElementsFromState(
     apoapsis,
     periapsis,
     period,
+    referenceBody: bodyId,
   };
 }
 

@@ -2,7 +2,7 @@
 
 import { useRef, useMemo, useState, Suspense } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Line } from "@react-three/drei";
+import { Line, Html } from "@react-three/drei";
 import {
   EffectComposer,
   Bloom,
@@ -12,10 +12,13 @@ import * as THREE from "three";
 import { useFlightStore } from "@/stores/useFlightStore";
 import { useBuilderStore } from "@/stores/useBuilderStore";
 import { getEngineById } from "@/engine/data/engines";
-import { EARTH_RADIUS, KARMAN_LINE } from "@/engine/physics/constants";
+import { EARTH_RADIUS, KARMAN_LINE, MOON_RADIUS } from "@/engine/physics/constants";
+import { getActiveBodies, getBodyPosition } from "@/engine/physics/bodies";
+import type { CelestialBody } from "@/engine/physics/bodies";
 import EarthSphere from "@/components/three/EarthSphere";
 import StarField from "@/components/three/StarField";
-import type { OrbitalTarget } from "@/types/mission";
+import type { OrbitalTarget, MissionTier } from "@/types/mission";
+import type { Mission } from "@/types/mission";
 
 // --- Real proportional scale ---
 // Earth visual radius is 3 scene units = 6371 km.
@@ -24,12 +27,27 @@ import type { OrbitalTarget } from "@/types/mission";
 const EARTH_VISUAL_R = 3;
 const SCALE = EARTH_VISUAL_R / EARTH_RADIUS; // scene units per meter
 
+// --- Cape Canaveral launch site (28.5°N, 80.6°W) ---
+const ORBITAL_PLANE_Q = (() => {
+  const latRad = 28.5 * (Math.PI / 180);
+  const lonRad = -80.6 * (Math.PI / 180);
+  const qLat = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 0, 1),
+    latRad
+  );
+  const qLon = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 1, 0),
+    lonRad
+  );
+  return new THREE.Quaternion().multiplyQuaternions(qLon, qLat);
+})();
+
 /** Convert real altitude (meters) to scene-space radius from Earth center */
 function altToRadius(alt: number): number {
   return EARTH_VISUAL_R + alt * SCALE;
 }
 
-/** Convert simulation position to scene-space 3D position (real scale) */
+/** Convert simulation position to local orbital-plane 3D position */
 function simToScene(pos: { x: number; y: number }, altitude: number): THREE.Vector3 {
   const angle = Math.atan2(pos.y, pos.x);
   const r = altToRadius(altitude);
@@ -38,6 +56,18 @@ function simToScene(pos: { x: number; y: number }, altitude: number): THREE.Vect
     0,
     -Math.sin(angle) * r
   );
+}
+
+/** Convert simulation position (meters from Earth center) to scene-space 3D in orbital plane */
+function simPosToScene(pos: { x: number; y: number }): THREE.Vector3 {
+  const r = Math.sqrt(pos.x * pos.x + pos.y * pos.y);
+  const alt = r - EARTH_RADIUS;
+  return simToScene(pos, alt);
+}
+
+/** Convert simulation position to world-space 3D (with orbital plane rotation) */
+function simToWorld(pos: { x: number; y: number }, altitude: number): THREE.Vector3 {
+  return simToScene(pos, altitude).applyQuaternion(ORBITAL_PLANE_Q);
 }
 
 // --- Scene sub-components ---
@@ -150,6 +180,116 @@ function CurrentOrbitLine() {
       transparent
       opacity={0.4}
     />
+  );
+}
+
+/** Render the Moon as a small sphere at its computed position */
+function MoonBody({ simTime }: { simTime: number }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const { currentSnapshot } = useFlightStore();
+
+  useFrame(() => {
+    if (!meshRef.current) return;
+    const time = currentSnapshot?.time ?? simTime;
+    const moonBody = getActiveBodies({ tier: 3 } as Mission).find((b) => b.id === "moon");
+    if (!moonBody) return;
+    const moonPos = getBodyPosition(moonBody, time);
+    const scenePos = simPosToScene(moonPos);
+    meshRef.current.position.copy(scenePos);
+  });
+
+  const moonVisualR = MOON_RADIUS * SCALE; // ~0.82 scene units
+
+  return (
+    <group>
+      <mesh ref={meshRef}>
+        <sphereGeometry args={[moonVisualR, 32, 32]} />
+        <meshStandardMaterial color="#c8c8c0" roughness={0.9} />
+      </mesh>
+    </group>
+  );
+}
+
+/** SOI boundary ring for a body */
+function SOIRing({ body, simTime }: { body: CelestialBody; simTime: number }) {
+  const { currentSnapshot } = useFlightStore();
+  const groupRef = useRef<THREE.Group>(null);
+
+  const soiSceneR = body.soiRadius * SCALE;
+
+  const points = useMemo(() => {
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i <= 64; i++) {
+      const theta = (i / 64) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(theta) * soiSceneR, 0, Math.sin(theta) * soiSceneR));
+    }
+    return pts;
+  }, [soiSceneR]);
+
+  useFrame(() => {
+    if (!groupRef.current) return;
+    const time = currentSnapshot?.time ?? simTime;
+    const bodyPos = getBodyPosition(body, time);
+    const scenePos = simPosToScene(bodyPos);
+    groupRef.current.position.copy(scenePos);
+  });
+
+  return (
+    <group ref={groupRef}>
+      <Line
+        points={points}
+        color="#ffcc44"
+        lineWidth={0.5}
+        transparent
+        opacity={0.15}
+        dashed
+        dashSize={soiSceneR * 0.03}
+        gapSize={soiSceneR * 0.02}
+      />
+    </group>
+  );
+}
+
+/** Distant body marker (for Mars, Jupiter, Saturn — too far to render at scale) */
+function DistantBodyMarker({ body, simTime }: { body: CelestialBody; simTime: number }) {
+  const { currentSnapshot } = useFlightStore();
+  const markerRef = useRef<THREE.Group>(null);
+
+  useFrame(() => {
+    if (!markerRef.current) return;
+    const time = currentSnapshot?.time ?? simTime;
+    const bodyPos = getBodyPosition(body, time);
+    // Show as a direction indicator at a fixed distance from Earth
+    const dist = Math.sqrt(bodyPos.x * bodyPos.x + bodyPos.y * bodyPos.y);
+    const dir = { x: bodyPos.x / dist, y: bodyPos.y / dist };
+    // Place marker at 30 scene units from Earth (visual indicator, not to scale)
+    const markerDist = 30;
+    const angle = Math.atan2(dir.y, dir.x);
+    markerRef.current.position.set(
+      Math.cos(angle) * markerDist,
+      0,
+      -Math.sin(angle) * markerDist
+    );
+  });
+
+  const colors: Record<string, string> = {
+    mars: "#e06040",
+    jupiter: "#d4a060",
+    saturn: "#e0d080",
+  };
+
+  return (
+    <group ref={markerRef}>
+      <mesh>
+        <sphereGeometry args={[0.15, 16, 16]} />
+        <meshBasicMaterial color={colors[body.id] ?? "#ffffff"} />
+      </mesh>
+      <Html center distanceFactor={15} style={{ pointerEvents: "none" }}>
+        <div className="font-mono text-[0.5rem] tracking-[0.15em] uppercase text-white/60 whitespace-nowrap">
+          {body.name}
+        </div>
+      </Html>
+    </group>
   );
 }
 
@@ -367,7 +507,7 @@ function TrajectoryTrail() {
 }
 
 /** Camera: close to rocket, Earth's curvature fills background */
-function FollowCamera() {
+function FollowCamera({ missionTier }: { missionTier: number }) {
   const { currentSnapshot } = useFlightStore();
   const { camera } = useThree();
   const targetPos = useRef(new THREE.Vector3(0, 3, 5));
@@ -375,27 +515,33 @@ function FollowCamera() {
 
   useFrame(() => {
     if (!currentSnapshot) {
-      // Pre-launch: view of Earth from a moderate distance
-      targetPos.current.set(0, 3, 5);
-      targetLookAt.current.set(0, 0, 0);
+      // Pre-launch: position camera to see Cape Canaveral launch site
+      const launchPoint = new THREE.Vector3(EARTH_VISUAL_R, 0, 0)
+        .applyQuaternion(ORBITAL_PLANE_Q);
+      const outward = launchPoint.clone().normalize();
+      targetPos.current.copy(launchPoint)
+        .add(outward.clone().multiplyScalar(1.5))
+        .add(new THREE.Vector3(0, 1.5, 0));
+      targetLookAt.current.copy(launchPoint).multiplyScalar(0.8);
     } else {
-      const rocketPos = simToScene(currentSnapshot.position, currentSnapshot.altitude);
-      const altScene = currentSnapshot.altitude * SCALE; // altitude in scene units
+      // Flight: follow rocket in world space
+      const rocketPos = simToWorld(currentSnapshot.position, currentSnapshot.altitude);
+      const altScene = currentSnapshot.altitude * SCALE;
 
-      // Camera distance from rocket scales with altitude:
-      // At ground level: very close (~0.1 units)
-      // At 400km (~0.19 units above surface): pull back to ~0.5 units
-      // At higher altitudes: continue pulling back proportionally
-      const camDist = Math.max(0.08, altScene * 2.5 + 0.05);
+      // For deep space missions, scale camera distance more aggressively
+      let camDist: number;
+      if (missionTier >= 3 && altScene > 10) {
+        // Deep space: logarithmic camera distance
+        camDist = Math.max(2, Math.log10(altScene) * 8);
+      } else {
+        camDist = Math.max(0.08, altScene * 2.5 + 0.05);
+      }
 
-      // Position camera outward from Earth center (same radial direction as rocket)
-      // and slightly "above" the orbital plane (Y-up)
       const outward = rocketPos.clone().normalize();
       targetPos.current.copy(rocketPos)
         .add(outward.clone().multiplyScalar(camDist * 0.5))
         .add(new THREE.Vector3(0, camDist * 0.7, 0));
 
-      // Look at the rocket
       targetLookAt.current.copy(rocketPos);
     }
 
@@ -408,7 +554,15 @@ function FollowCamera() {
 
 // --- Inner 3D scene ---
 
-function FlightSceneInner({ targetOrbit }: { targetOrbit?: OrbitalTarget }) {
+function FlightSceneInner({ targetOrbit, mission }: { targetOrbit?: OrbitalTarget; mission?: Mission }) {
+  const activeBodies = useMemo(() => {
+    if (!mission) return [];
+    return getActiveBodies(mission);
+  }, [mission]);
+
+  const moonBody = activeBodies.find((b) => b.id === "moon");
+  const distantBodies = activeBodies.filter((b) => b.parentBody === "sun");
+
   return (
     <>
       {/* Sun — strong directional from upper-right, warm white */}
@@ -420,14 +574,26 @@ function FlightSceneInner({ targetOrbit }: { targetOrbit?: OrbitalTarget }) {
 
       <StarField radius={50} />
       <EarthSphere radius={EARTH_VISUAL_R} showAtmosphere rotationSpeed={0.002} atmosphereIntensity={0.04} />
-      <KarmanRing />
 
-      {targetOrbit && <TargetOrbitRing targetOrbit={targetOrbit} />}
-      <CurrentOrbitLine />
-      <TrajectoryTrail />
-      <FlightRocketModel />
+      {/* Orbital plane — rotated so launch is from Cape Canaveral */}
+      <group quaternion={ORBITAL_PLANE_Q}>
+        <KarmanRing />
+        {targetOrbit && <TargetOrbitRing targetOrbit={targetOrbit} />}
+        <CurrentOrbitLine />
+        <TrajectoryTrail />
+        <FlightRocketModel />
 
-      <FollowCamera />
+        {/* Moon */}
+        {moonBody && <MoonBody simTime={0} />}
+        {moonBody && <SOIRing body={moonBody} simTime={0} />}
+
+        {/* Distant body direction markers */}
+        {distantBodies.map((body) => (
+          <DistantBodyMarker key={body.id} body={body} simTime={0} />
+        ))}
+      </group>
+
+      <FollowCamera missionTier={mission?.tier ?? 1} />
 
       {/* Post-processing */}
       <EffectComposer>
@@ -447,9 +613,10 @@ function FlightSceneInner({ targetOrbit }: { targetOrbit?: OrbitalTarget }) {
 
 interface FlightScene3DProps {
   targetOrbit?: OrbitalTarget;
+  mission?: Mission;
 }
 
-export default function FlightScene3D({ targetOrbit }: FlightScene3DProps) {
+export default function FlightScene3D({ targetOrbit, mission }: FlightScene3DProps) {
   const [sceneReady, setSceneReady] = useState(false);
 
   return (
@@ -462,7 +629,7 @@ export default function FlightScene3D({ targetOrbit }: FlightScene3DProps) {
         </div>
       )}
       <Canvas
-        camera={{ fov: 50, near: 0.001, far: 200, position: [0, 3, 5] }}
+        camera={{ fov: 50, near: 0.001, far: 500, position: [0, 3, 5] }}
         gl={{
           antialias: true,
           toneMapping: THREE.ACESFilmicToneMapping,
@@ -471,7 +638,7 @@ export default function FlightScene3D({ targetOrbit }: FlightScene3DProps) {
         onCreated={() => setSceneReady(true)}
       >
         <Suspense fallback={null}>
-          <FlightSceneInner targetOrbit={targetOrbit} />
+          <FlightSceneInner targetOrbit={targetOrbit} mission={mission} />
         </Suspense>
       </Canvas>
     </div>

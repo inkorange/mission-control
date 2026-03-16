@@ -8,7 +8,9 @@
       "Bash(node -e:*)",
       "Bash(ls:*)",
       "Bash(find:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(wc:*)",
+      "Bash(cat:*)"
     ],
     "additionalDirectories": [
       "/Users/christopherwest/web/mission-control/engine",

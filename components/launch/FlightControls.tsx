@@ -13,7 +13,7 @@ interface FlightControlsProps {
   currentStage: number;
 }
 
-const WARP_OPTIONS = [1, 5, 10, 50, 100];
+const WARP_OPTIONS = [1, 5, 10, 50, 100, 1000, 10000];
 
 export default function FlightControls({
   onThrottleChange,
@@ -74,6 +74,12 @@ export default function FlightControls({
           break;
         case "5":
           onWarpChange(100);
+          break;
+        case "6":
+          onWarpChange(1000);
+          break;
+        case "7":
+          onWarpChange(10000);
           break;
       }
     },
@@ -164,18 +170,18 @@ export default function FlightControls({
         <span className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1.5">
           Time Warp
         </span>
-        <div className="flex gap-1">
+        <div className="flex gap-1 flex-wrap">
           {WARP_OPTIONS.map((w) => (
             <button
               key={w}
               onClick={() => onWarpChange(w)}
-              className={`flex-1 py-1 font-mono text-[0.7rem] rounded-sm border transition-colors ${
+              className={`flex-1 min-w-[2rem] py-1 font-mono text-[0.6rem] rounded-sm border transition-colors ${
                 timeScale === w
                   ? "border-[var(--nasa-blue-light)] bg-[var(--nasa-blue)]/20 text-[var(--nasa-blue-light)]"
                   : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30"
               }`}
             >
-              {w}x
+              {w >= 1000 ? `${w / 1000}k` : w}x
             </button>
           ))}
         </div>
@@ -216,7 +222,7 @@ export default function FlightControls({
       {/* Keyboard shortcuts hint */}
       <div className="pt-2 border-t border-[var(--border)]">
         <p className="font-mono text-[0.5rem] tracking-wider text-[var(--muted)]/60 leading-relaxed">
-          SPC=Pause &middot; Z/X=Throttle &middot; S=Stage &middot; 1-5=Warp
+          SPC=Pause &middot; Z/X=Throttle &middot; S=Stage &middot; 1-7=Warp
         </p>
       </div>
     </div>

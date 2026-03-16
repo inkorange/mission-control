@@ -54,13 +54,18 @@ export function formatMass(kg: number): string {
 }
 
 /**
- * Format time in seconds to T+ HH:MM:SS.
+ * Format time in seconds to T+ DDd HH:MM:SS (or T+ HH:MM:SS if < 24h).
  */
 export function formatMissionTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = Math.floor(seconds % 60);
-  return `T+ ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  const hms = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  if (d > 0) {
+    return `T+ ${d}d ${hms}`;
+  }
+  return `T+ ${hms}`;
 }
 
 /**

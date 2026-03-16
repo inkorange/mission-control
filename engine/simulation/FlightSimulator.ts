@@ -1,8 +1,18 @@
 import { EARTH_RADIUS, FIXED_DT, DEFAULT_DRAG_COEFFICIENT, DEFAULT_CROSS_SECTION, G0 } from "../physics/constants";
 import { rk4Step, createLaunchState } from "../physics/trajectory";
+import type { GravBody } from "../physics/trajectory";
 import { massFlowRate } from "../physics/tsiolkovsky";
 import { orbitalElementsFromState, isOrbitStable } from "../physics/orbit";
-import { magnitude, normalize, scale, rotate, dot } from "@/lib/math";
+import {
+  getActiveBodies,
+  getBodyPosition,
+  getBodyVelocity,
+  computeBodyPositions,
+  getSOIBody,
+  distanceToBody,
+} from "../physics/bodies";
+import type { CelestialBody } from "../physics/bodies";
+import { magnitude, normalize, scale, rotate, dot, sub } from "@/lib/math";
 import { degToRad } from "@/lib/math";
 import type { Vector2D, SimState, FlightSnapshot, FlightResult, FlightOutcome, OrbitalElements } from "@/types/physics";
 import type { RocketConfig, EngineDef } from "@/types/rocket";
@@ -10,7 +20,7 @@ import type { Mission, OrbitalTarget } from "@/types/mission";
 
 export interface FlightEvent {
   time: number;
-  type: "ignition" | "stage_separation" | "fuel_depleted" | "burn_start" | "burn_stop" | "abort" | "orbit_achieved";
+  type: "ignition" | "stage_separation" | "fuel_depleted" | "burn_start" | "burn_stop" | "abort" | "orbit_achieved" | "soi_enter" | "soi_exit" | "target_reached";
   stageIndex?: number;
   description: string;
 }
@@ -44,6 +54,14 @@ export class FlightSimulator {
   private engineLookup: Map<string, EngineDef>;
   private suborbitalTargetReached: boolean;
   private launchAngle: number;
+
+  // Multi-body
+  private activeBodies: CelestialBody[];
+  private currentSOIBody: string;
+  private lastSOIBody: string;
+  private bodyPositions: Record<string, Vector2D>;
+  private lastTargetDistance: number | null;
+  private targetApproaching: boolean;
 
   constructor(
     config: RocketConfig,
@@ -120,6 +138,14 @@ export class FlightSimulator {
     this.suborbitalTargetReached = false;
     this.launchAngle = Math.atan2(this.state.position.y, this.state.position.x);
 
+    // Multi-body setup
+    this.activeBodies = getActiveBodies(mission);
+    this.currentSOIBody = "earth";
+    this.lastSOIBody = "earth";
+    this.bodyPositions = computeBodyPositions(this.activeBodies, 0);
+    this.lastTargetDistance = null;
+    this.targetApproaching = false;
+
     this.events.push({
       time: 0,
       type: "ignition",
@@ -159,9 +185,19 @@ export class FlightSimulator {
     return [...this.events];
   }
 
-  /** Set time warp */
+  /** Get the current SOI body */
+  get soiBody(): string {
+    return this.currentSOIBody;
+  }
+
+  /** Get body positions */
+  get currentBodyPositions(): Record<string, Vector2D> {
+    return { ...this.bodyPositions };
+  }
+
+  /** Set time warp — allows up to 10000x for interplanetary missions */
   setTimeScale(scale: number): void {
-    this.timeScale = Math.max(1, Math.min(100, scale));
+    this.timeScale = Math.max(1, Math.min(10000, scale));
   }
 
   /** Set throttle (0-1) */
@@ -221,7 +257,9 @@ export class FlightSimulator {
     if (!this.isRunning || this.outcome) return;
 
     const dtSim = dtReal * this.timeScale;
-    const steps = Math.max(1, Math.ceil(dtSim / FIXED_DT));
+    // Use larger timestep at high warp to avoid excessive substeps
+    const physDt = this.timeScale > 100 ? 0.1 : FIXED_DT;
+    const steps = Math.max(1, Math.ceil(dtSim / physDt));
     const actualDt = dtSim / steps;
 
     for (let i = 0; i < steps; i++) {
@@ -239,6 +277,15 @@ export class FlightSimulator {
       this.isRunning = false;
       return;
     }
+
+    // Update body positions for current sim time
+    this.bodyPositions = computeBodyPositions(this.activeBodies, this.state.time);
+
+    // Build gravity bodies for N-body integration
+    const extraBodies: GravBody[] = this.activeBodies.map((body) => ({
+      mu: body.mu,
+      position: this.bodyPositions[body.id],
+    }));
 
     // Determine effective thrust and Isp based on altitude
     const altFraction = Math.min(1, this.state.altitude / 100_000);
@@ -286,13 +333,14 @@ export class FlightSimulator {
       });
     }
 
-    // RK4 integration
+    // RK4 integration with N-body gravity
     this.state = rk4Step(
       this.state,
       dt,
       thrustVec,
       DEFAULT_DRAG_COEFFICIENT,
-      DEFAULT_CROSS_SECTION
+      DEFAULT_CROSS_SECTION,
+      extraBodies
     );
 
     // Track delta-v used
@@ -300,22 +348,91 @@ export class FlightSimulator {
     this.totalDeltaVUsed += Math.abs(currentVelocity - this.lastVelocity);
     this.lastVelocity = currentVelocity;
 
+    // Update SOI tracking
+    this.lastSOIBody = this.currentSOIBody;
+    this.currentSOIBody = getSOIBody(this.state.position, this.activeBodies, this.bodyPositions);
+
+    // SOI transition events
+    if (this.currentSOIBody !== this.lastSOIBody) {
+      if (this.lastSOIBody === "earth" && this.currentSOIBody !== "earth") {
+        const body = this.activeBodies.find((b) => b.id === this.currentSOIBody);
+        this.events.push({
+          time: this.state.time,
+          type: "soi_enter",
+          description: `Entered ${body?.name ?? this.currentSOIBody} sphere of influence`,
+        });
+      } else if (this.lastSOIBody !== "earth" && this.currentSOIBody === "earth") {
+        const body = this.activeBodies.find((b) => b.id === this.lastSOIBody);
+        this.events.push({
+          time: this.state.time,
+          type: "soi_exit",
+          description: `Exited ${body?.name ?? this.lastSOIBody} sphere of influence`,
+        });
+      }
+    }
+
+    // Track closest approach to all bodies
+    for (const body of this.activeBodies) {
+      const dist = distanceToBody(this.state.position, body.id, this.bodyPositions);
+      if (dist !== null) {
+        const prev = this.state.closestApproach[body.id];
+        if (prev === undefined || dist < prev) {
+          this.state.closestApproach[body.id] = dist;
+        }
+      }
+    }
+
+    // Track target body approach/departure for flyby detection
+    if (this.mission.requirements.targetBody) {
+      const targetId = this.mission.requirements.targetBody;
+      const dist = distanceToBody(this.state.position, targetId, this.bodyPositions);
+      if (dist !== null) {
+        if (this.lastTargetDistance !== null) {
+          this.targetApproaching = dist < this.lastTargetDistance;
+        }
+        this.lastTargetDistance = dist;
+      }
+    }
+
     // Check termination conditions
     this.checkTermination();
   }
 
   private checkTermination(): void {
-    // Crash check
+    // Crash check (Earth surface)
     if (this.state.altitude < 0) {
       this.outcome = "crash";
       this.isRunning = false;
       return;
     }
 
-    // Suborbital mission check: if the mission only requires reaching an altitude
-    // (periapsis.min is -Infinity), mark success when altitude is reached but let the
-    // rocket coast to apoapsis so the full ballistic arc is captured in the flight data.
-    if (this.mission.requirements.targetOrbit) {
+    // Crash check: impact on a target body
+    if (this.currentSOIBody !== "earth") {
+      const body = this.activeBodies.find((b) => b.id === this.currentSOIBody);
+      if (body) {
+        const dist = distanceToBody(this.state.position, body.id, this.bodyPositions);
+        if (dist !== null && dist < body.radius) {
+          // For landing missions, this counts as success
+          if (this.mission.requirements.targetBody === body.id &&
+              this.mission.description.toLowerCase().includes("land")) {
+            this.outcome = "mission_complete";
+            this.isRunning = false;
+            this.events.push({
+              time: this.state.time,
+              type: "target_reached",
+              description: `Landed on ${body.name}!`,
+            });
+            return;
+          }
+          this.outcome = "crash";
+          this.isRunning = false;
+          return;
+        }
+      }
+    }
+
+    // Suborbital mission check
+    if (this.mission.requirements.targetOrbit && !this.mission.requirements.targetBody) {
       const target = this.mission.requirements.targetOrbit;
       const isSuborbitalMission = target.periapsis.min === -Infinity;
 
@@ -328,9 +445,6 @@ export class FlightSimulator {
         });
       }
 
-      // End suborbital flight once past apoapsis (radial velocity becomes negative).
-      // Return either way to prevent the fuel-exhaustion check from stopping the sim
-      // at exactly 100km (a suborbital trajectory always has periapsis < 0).
       if (isSuborbitalMission && this.suborbitalTargetReached) {
         const radialDir = normalize(this.state.position);
         const radialVelocity = dot(radialDir, this.state.velocity);
@@ -338,20 +452,76 @@ export class FlightSimulator {
           this.outcome = "mission_complete";
           this.isRunning = false;
         }
-        return; // Always return — coast to apoapsis, skip other termination checks
+        return;
       }
     }
 
-    // Check orbital status when above atmosphere
-    if (this.state.altitude > 100_000) {
+    // Target body missions (Tier 3+)
+    if (this.mission.requirements.targetBody) {
+      const targetId = this.mission.requirements.targetBody;
+      const body = this.activeBodies.find((b) => b.id === targetId);
+
+      if (body) {
+        const dist = distanceToBody(this.state.position, targetId, this.bodyPositions);
+
+        // Flyby detection: inside SOI, was approaching, now receding
+        if (this.currentSOIBody === targetId && this.lastTargetDistance !== null && !this.targetApproaching) {
+          // Check if this is a flyby mission (has targetBody but no specific orbit requirement for that body)
+          const isFlybyMission = !this.mission.requirements.targetOrbit ||
+            (this.mission.requirements.targetOrbit.periapsis.min === -Infinity);
+
+          if (isFlybyMission) {
+            const closestDist = this.state.closestApproach[targetId] ?? Infinity;
+            this.outcome = "target_reached";
+            this.isRunning = false;
+            this.events.push({
+              time: this.state.time,
+              type: "target_reached",
+              description: `${body.name} flyby complete! Closest approach: ${(closestDist / 1000).toFixed(0)}km`,
+            });
+            return;
+          }
+        }
+
+        // Orbit detection around target body
+        if (this.currentSOIBody === targetId && dist !== null) {
+          const bodyPos = this.bodyPositions[targetId];
+          const bodyVel = getBodyVelocity(body, this.state.time);
+
+          const elements = orbitalElementsFromState(
+            this.state.position,
+            this.state.velocity,
+            {
+              mu: body.mu,
+              bodyCenter: bodyPos,
+              bodyVelocity: bodyVel,
+              bodyRadius: body.radius,
+              bodyId: targetId,
+            }
+          );
+
+          if (isOrbitStable(elements) && elements.periapsis > 0) {
+            this.outcome = "mission_complete";
+            this.isRunning = false;
+            this.events.push({
+              time: this.state.time,
+              type: "orbit_achieved",
+              description: `Stable ${body.name} orbit achieved!`,
+            });
+            return;
+          }
+        }
+      }
+    }
+
+    // Earth orbit checks (for missions without targetBody)
+    if (!this.mission.requirements.targetBody && this.state.altitude > 100_000) {
       const elements = orbitalElementsFromState(
         this.state.position,
         this.state.velocity
       );
 
-      // Check if we've achieved a stable orbit
       if (isOrbitStable(elements)) {
-        // Check if it matches mission target
         if (this.mission.requirements.targetOrbit) {
           const target = this.mission.requirements.targetOrbit;
           if (
@@ -371,9 +541,7 @@ export class FlightSimulator {
           }
         }
 
-        // Generic orbit achieved (periapsis above atmosphere)
         if (elements.periapsis > 100_000) {
-          // If no specific target, any stable orbit counts
           if (!this.mission.requirements.targetOrbit) {
             this.outcome = "orbit_achieved";
             this.isRunning = false;
@@ -385,6 +553,24 @@ export class FlightSimulator {
             return;
           }
         }
+      }
+    }
+
+    // Solar escape detection (for Tier 5 escape mission)
+    if (this.mission.tier === 5 && !this.mission.requirements.targetBody) {
+      // Earth escape velocity at current distance
+      const r = magnitude(this.state.position);
+      const v = magnitude(this.state.velocity);
+      const escapeV = Math.sqrt(2 * 3.986e14 / r); // Earth mu
+      if (v > escapeV && this.state.altitude > 1e7) {
+        this.outcome = "escaped";
+        this.isRunning = false;
+        this.events.push({
+          time: this.state.time,
+          type: "orbit_achieved",
+          description: "Escape velocity achieved!",
+        });
+        return;
       }
     }
 
@@ -406,8 +592,26 @@ export class FlightSimulator {
   }
 
   private recordSnapshot(): void {
+    // Compute orbital elements relative to current SOI body
     let orbitalElements: OrbitalElements | null = null;
-    if (this.state.altitude > 50_000) {
+    if (this.currentSOIBody !== "earth") {
+      const body = this.activeBodies.find((b) => b.id === this.currentSOIBody);
+      if (body) {
+        const bodyPos = this.bodyPositions[this.currentSOIBody];
+        const bodyVel = getBodyVelocity(body, this.state.time);
+        orbitalElements = orbitalElementsFromState(
+          this.state.position,
+          this.state.velocity,
+          {
+            mu: body.mu,
+            bodyCenter: bodyPos,
+            bodyVelocity: bodyVel,
+            bodyRadius: body.radius,
+            bodyId: this.currentSOIBody,
+          }
+        );
+      }
+    } else if (this.state.altitude > 50_000) {
       orbitalElements = orbitalElementsFromState(
         this.state.position,
         this.state.velocity
@@ -418,6 +622,12 @@ export class FlightSimulator {
     const currentAngle = Math.atan2(this.state.position.y, this.state.position.x);
     const angleTraveled = currentAngle - this.launchAngle;
     const downrangeDistance = Math.abs(angleTraveled) * EARTH_RADIUS;
+
+    // Distance to target body
+    const targetId = this.mission.requirements.targetBody;
+    const distToTarget = targetId
+      ? distanceToBody(this.state.position, targetId, this.bodyPositions)
+      : null;
 
     this.history.push({
       time: this.state.time,
@@ -431,6 +641,9 @@ export class FlightSimulator {
       pitchAngle: this.pitchAngle,
       orbitalElements,
       position: { ...this.state.position },
+      currentSOIBody: this.currentSOIBody,
+      distanceToTarget: distToTarget,
+      bodyPositions: { ...this.bodyPositions },
     });
   }
 
@@ -448,11 +661,30 @@ export class FlightSimulator {
       totalDeltaVUsed: this.totalDeltaVUsed,
       maxAltitude: Math.max(...this.history.map((s) => s.altitude)),
       flightDuration: this.state.time,
+      closestApproach: { ...this.state.closestApproach },
     };
   }
 
-  /** Get current orbital elements (null if below 50km) */
+  /** Get current orbital elements (null if below 50km from current SOI body) */
   getCurrentOrbit(): OrbitalElements | null {
+    if (this.currentSOIBody !== "earth") {
+      const body = this.activeBodies.find((b) => b.id === this.currentSOIBody);
+      if (body) {
+        const bodyPos = this.bodyPositions[this.currentSOIBody];
+        const bodyVel = getBodyVelocity(body, this.state.time);
+        return orbitalElementsFromState(
+          this.state.position,
+          this.state.velocity,
+          {
+            mu: body.mu,
+            bodyCenter: bodyPos,
+            bodyVelocity: bodyVel,
+            bodyRadius: body.radius,
+            bodyId: this.currentSOIBody,
+          }
+        );
+      }
+    }
     if (this.state.altitude < 50_000) return null;
     return orbitalElementsFromState(this.state.position, this.state.velocity);
   }

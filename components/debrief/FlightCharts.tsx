@@ -45,9 +45,25 @@ export default function FlightCharts({ history, keyEvents }: FlightChartsProps) 
     velocity: s.velocity,
   }));
 
-  // Only show a few key events as reference lines to avoid clutter
-  const eventLines = keyEvents.filter(
-    (e) => e.type === "stage_separation" || e.type === "karman_line" || e.type === "max_q"
+  // Compute acceleration from velocity differences
+  const accelData = useMemo(() => {
+    const points: { time: number; acceleration: number }[] = [];
+    for (let i = 1; i < data.length; i++) {
+      const dt = data[i].time - data[i - 1].time;
+      if (dt <= 0) continue;
+      const dv = data[i].velocity - data[i - 1].velocity;
+      points.push({
+        time: data[i].time,
+        acceleration: dv / dt, // m/s²
+      });
+    }
+    return points;
+  }, [data]);
+
+  // Separate stage separation events from other key events
+  const separationEvents = keyEvents.filter((e) => e.type === "stage_separation");
+  const otherEvents = keyEvents.filter(
+    (e) => e.type === "karman_line" || e.type === "max_q"
   );
 
   return (
@@ -64,6 +80,8 @@ export default function FlightCharts({ history, keyEvents }: FlightChartsProps) 
               <CartesianGrid stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
               <XAxis
                 dataKey="time"
+                type="number"
+                domain={["dataMin", "dataMax"]}
                 stroke="rgba(255,255,255,0.25)"
                 tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 9, fontFamily: "monospace" }}
                 tickFormatter={formatTime}
@@ -74,9 +92,9 @@ export default function FlightCharts({ history, keyEvents }: FlightChartsProps) 
                 tickFormatter={(v: number) => `${v.toFixed(0)}`}
               />
               <Tooltip content={<ChartTooltip unit="km" />} />
-              {eventLines.map((e, i) => (
+              {otherEvents.map((e: FlightKeyEvent, i: number) => (
                 <ReferenceLine
-                  key={i}
+                  key={`other-${i}`}
                   x={e.time}
                   stroke="rgba(255, 184, 0, 0.5)"
                   strokeDasharray="4 4"
@@ -84,6 +102,22 @@ export default function FlightCharts({ history, keyEvents }: FlightChartsProps) 
                     value: e.label,
                     position: "top",
                     fill: "rgba(255, 184, 0, 0.7)",
+                    fontSize: 8,
+                    fontFamily: "monospace",
+                  }}
+                />
+              ))}
+              {separationEvents.map((e: FlightKeyEvent, i: number) => (
+                <ReferenceLine
+                  key={`sep-${i}`}
+                  x={e.time}
+                  stroke="rgba(255, 95, 95, 0.7)"
+                  strokeDasharray="3 3"
+                  strokeWidth={1.5}
+                  label={{
+                    value: e.label,
+                    position: "top",
+                    fill: "rgba(255, 95, 95, 0.9)",
                     fontSize: 8,
                     fontFamily: "monospace",
                   }}
@@ -111,6 +145,8 @@ export default function FlightCharts({ history, keyEvents }: FlightChartsProps) 
               <CartesianGrid stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
               <XAxis
                 dataKey="time"
+                type="number"
+                domain={["dataMin", "dataMax"]}
                 stroke="rgba(255,255,255,0.25)"
                 tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 9, fontFamily: "monospace" }}
                 tickFormatter={formatTime}
@@ -121,12 +157,28 @@ export default function FlightCharts({ history, keyEvents }: FlightChartsProps) 
                 tickFormatter={(v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${v.toFixed(0)}`}
               />
               <Tooltip content={<ChartTooltip unit="m/s" />} />
-              {eventLines.map((e, i) => (
+              {otherEvents.map((e: FlightKeyEvent, i: number) => (
                 <ReferenceLine
-                  key={i}
+                  key={`other-${i}`}
                   x={e.time}
                   stroke="rgba(255, 184, 0, 0.5)"
                   strokeDasharray="4 4"
+                />
+              ))}
+              {separationEvents.map((e: FlightKeyEvent, i: number) => (
+                <ReferenceLine
+                  key={`sep-${i}`}
+                  x={e.time}
+                  stroke="rgba(255, 95, 95, 0.7)"
+                  strokeDasharray="3 3"
+                  strokeWidth={1.5}
+                  label={{
+                    value: e.label,
+                    position: "top",
+                    fill: "rgba(255, 95, 95, 0.9)",
+                    fontSize: 8,
+                    fontFamily: "monospace",
+                  }}
                 />
               ))}
               <Line
@@ -139,6 +191,79 @@ export default function FlightCharts({ history, keyEvents }: FlightChartsProps) 
               />
             </LineChart>
           </ResponsiveContainer>
+        </div>
+
+        {/* Acceleration chart */}
+        {accelData.length > 0 && (
+          <div>
+            <span className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1.5">
+              Acceleration (m/s²)
+            </span>
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={accelData} margin={{ top: 5, right: 10, left: 10, bottom: 0 }}>
+                <CartesianGrid stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="time"
+                  type="number"
+                  domain={["dataMin", "dataMax"]}
+                  stroke="rgba(255,255,255,0.25)"
+                  tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 9, fontFamily: "monospace" }}
+                  tickFormatter={formatTime}
+                />
+                <YAxis
+                  stroke="rgba(255,255,255,0.25)"
+                  tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 9, fontFamily: "monospace" }}
+                  tickFormatter={(v: number) => `${v.toFixed(1)}`}
+                />
+                <Tooltip content={<ChartTooltip unit="m/s²" />} />
+                {otherEvents.map((e: FlightKeyEvent, i: number) => (
+                  <ReferenceLine
+                    key={`other-${i}`}
+                    x={e.time}
+                    stroke="rgba(255, 184, 0, 0.5)"
+                    strokeDasharray="4 4"
+                  />
+                ))}
+                {separationEvents.map((e: FlightKeyEvent, i: number) => (
+                  <ReferenceLine
+                    key={`sep-${i}`}
+                    x={e.time}
+                    stroke="rgba(255, 95, 95, 0.7)"
+                    strokeDasharray="3 3"
+                    strokeWidth={1.5}
+                    label={{
+                      value: e.label,
+                      position: "top",
+                      fill: "rgba(255, 95, 95, 0.9)",
+                      fontSize: 8,
+                      fontFamily: "monospace",
+                    }}
+                  />
+                ))}
+                <Line
+                  type="monotone"
+                  dataKey="acceleration"
+                  stroke="#FF9100"
+                  strokeWidth={1.5}
+                  dot={false}
+                  isAnimationActive={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Legend */}
+        <div className="flex flex-wrap gap-x-5 gap-y-1.5 pt-2 border-t border-[var(--border)]">
+          {separationEvents.length > 0 && (
+            <LegendItem color="rgba(255, 95, 95, 0.9)" dashed label="Stage Separation" />
+          )}
+          {otherEvents.some((e) => e.type === "max_q") && (
+            <LegendItem color="rgba(255, 184, 0, 0.7)" dashed label="Max-Q" />
+          )}
+          {otherEvents.some((e) => e.type === "karman_line") && (
+            <LegendItem color="rgba(255, 184, 0, 0.7)" dashed label="Kármán Line" />
+          )}
         </div>
       </div>
     </div>
@@ -166,13 +291,33 @@ function ChartTooltip({
   const formatted =
     unit === "km"
       ? `${value.toFixed(1)} km`
-      : value >= 1000
-        ? `${(value / 1000).toFixed(2)} km/s`
-        : `${value.toFixed(0)} m/s`;
+      : unit === "m/s²"
+        ? `${value.toFixed(2)} m/s²`
+        : value >= 1000
+          ? `${(value / 1000).toFixed(2)} km/s`
+          : `${value.toFixed(0)} m/s`;
 
   return (
     <div className="px-2 py-1 rounded-sm bg-[var(--surface)] border border-[var(--border)]">
       <span className="font-mono text-[0.65rem] text-[var(--data)]">{formatted}</span>
+    </div>
+  );
+}
+
+function LegendItem({ color, dashed, label }: { color: string; dashed?: boolean; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <svg width="20" height="10">
+        <line
+          x1="0" y1="5" x2="20" y2="5"
+          stroke={color}
+          strokeWidth={1.5}
+          strokeDasharray={dashed ? "3 3" : undefined}
+        />
+      </svg>
+      <span className="font-mono text-[0.6rem] tracking-wide" style={{ color }}>
+        {label}
+      </span>
     </div>
   );
 }

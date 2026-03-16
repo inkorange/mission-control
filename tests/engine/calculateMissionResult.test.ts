@@ -32,12 +32,16 @@ function makeFlight(overrides: Partial<FlightResult> = {}): FlightResult {
         pitchAngle: 0,
         orbitalElements: makeOrbit(),
         position: { x: 6_571_000, y: 0 },
+        currentSOIBody: "earth",
+        distanceToTarget: null,
+        bodyPositions: {},
       },
     ],
     finalOrbit: makeOrbit(),
     totalDeltaVUsed: 9500,
     maxAltitude: 200_000,
     flightDuration: 300,
+    closestApproach: {},
     ...overrides,
   };
 }

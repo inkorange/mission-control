@@ -7,12 +7,21 @@ import {
   formatMissionTime,
 } from "@/lib/formatters";
 
+const BODY_NAMES: Record<string, string> = {
+  earth: "Earth",
+  moon: "Moon",
+  mars: "Mars",
+  jupiter: "Jupiter",
+  saturn: "Saturn",
+};
+
 interface TelemetryHUDProps {
   launchPhase: "idle" | "countdown" | "flight";
   countdown: number | null;
   initialFuel: number;
   initialMass: number;
   fuelCapacity: number;
+  targetBody?: string;
 }
 
 export default function TelemetryHUD({
@@ -21,6 +30,7 @@ export default function TelemetryHUD({
   initialFuel,
   initialMass,
   fuelCapacity,
+  targetBody,
 }: TelemetryHUDProps) {
   const { currentSnapshot, currentOrbit, isActive, timeScale } =
     useFlightStore();
@@ -114,11 +124,37 @@ export default function TelemetryHUD({
         </div>
       </div>
 
+      {/* Navigation — target body info */}
+      {inFlight && targetBody && (
+        <div>
+          <span className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1.5">
+            Navigation
+          </span>
+          <div className="grid grid-cols-2 gap-2">
+            <TelemetryReadout
+              label="SOI"
+              value={BODY_NAMES[currentSnapshot?.currentSOIBody ?? "earth"] ?? "Earth"}
+              highlight={currentSnapshot?.currentSOIBody !== "earth"}
+            />
+            <TelemetryReadout
+              label={`Dist to ${BODY_NAMES[targetBody] ?? targetBody}`}
+              value={
+                currentSnapshot?.distanceToTarget != null
+                  ? formatDistance(currentSnapshot.distanceToTarget)
+                  : "—"
+              }
+            />
+          </div>
+        </div>
+      )}
+
       {/* Orbital data */}
       {currentOrbit && (
         <div>
           <span className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1.5">
-            Orbital Data
+            {currentOrbit.referenceBody && currentOrbit.referenceBody !== "earth"
+              ? `${BODY_NAMES[currentOrbit.referenceBody] ?? currentOrbit.referenceBody} Orbit`
+              : "Orbital Data"}
           </span>
           <div className="grid grid-cols-2 gap-2">
             <TelemetryReadout
@@ -138,8 +174,10 @@ export default function TelemetryHUD({
             <TelemetryReadout
               label="Period"
               value={
-                currentOrbit.period > 0
-                  ? `${(currentOrbit.period / 60).toFixed(1)}m`
+                currentOrbit.period > 0 && isFinite(currentOrbit.period)
+                  ? currentOrbit.period > 86400
+                    ? `${(currentOrbit.period / 86400).toFixed(1)}d`
+                    : `${(currentOrbit.period / 60).toFixed(1)}m`
                   : "—"
               }
             />

@@ -10,6 +10,7 @@ export interface OrbitalElements {
   apoapsis: number; // Highest point above surface (meters)
   periapsis: number; // Lowest point above surface (meters)
   period: number; // Orbital period (seconds)
+  referenceBody?: string; // "earth" (default), "moon", "mars", etc.
 }
 
 export interface SimState {
@@ -19,6 +20,7 @@ export interface SimState {
   time: number; // seconds since launch
   altitude: number; // meters above surface
   fuel: number; // kg remaining in current stage
+  closestApproach: Record<string, number>; // body id → min distance in meters
 }
 
 export interface FlightSnapshot {
@@ -33,11 +35,16 @@ export interface FlightSnapshot {
   pitchAngle: number; // degrees from vertical
   orbitalElements: OrbitalElements | null;
   position: Vector2D;
+  currentSOIBody: string;
+  distanceToTarget: number | null;
+  bodyPositions: Record<string, Vector2D>;
 }
 
 export type FlightOutcome =
   | "orbit_achieved"
   | "mission_complete"
+  | "target_reached"
+  | "escaped"
   | "crash"
   | "suborbital"
   | "aborted"
@@ -50,6 +57,7 @@ export interface FlightResult {
   totalDeltaVUsed: number;
   maxAltitude: number;
   flightDuration: number;
+  closestApproach: Record<string, number>;
 }
 
 export interface HohmannTransfer {

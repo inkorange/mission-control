@@ -8,37 +8,46 @@ import { clamp } from "@/lib/math";
 /**
  * Calculate the optimal delta-v for a mission.
  * For orbit missions, uses Hohmann transfer as baseline.
+ * For target body missions, uses approximate transfer costs.
  */
 function optimalDeltaV(mission: Mission): number {
+  const leoInsertionDv = 9400; // LEO insertion ≈ 9,400 m/s (including gravity + drag losses)
+
+  // Target body missions — approximate delta-v budgets
+  if (mission.requirements.targetBody) {
+    switch (mission.requirements.targetBody) {
+      case "moon":
+        return leoInsertionDv + 3100; // TLI ~3,100 m/s beyond LEO
+      case "mars":
+        return leoInsertionDv + 3600; // TMI ~3,600 m/s beyond LEO
+      case "jupiter":
+        return leoInsertionDv + 6300; // ~6,300 m/s beyond LEO (with gravity assist can be less)
+      case "saturn":
+        return leoInsertionDv + 7300; // ~7,300 m/s beyond LEO
+    }
+  }
+
   if (!mission.requirements.targetOrbit) return 0;
 
   const target = mission.requirements.targetOrbit;
 
-  // Approximate: delta-v from surface to target orbit
-  // LEO insertion ≈ 9,400 m/s (including gravity + drag losses)
-  const leoInsertionDv = 9400;
-
   // Suborbital missions (periapsis is -Infinity) — just need to reach altitude
-  // Approximate dv for a vertical sounding rocket to reach target apoapsis
   const isSuborbital = !isFinite(target.periapsis.min) || !isFinite(target.periapsis.max);
   if (isSuborbital) {
-    // For a suborbital hop, approximate dv ≈ sqrt(2 * g * h) + drag losses (~15%)
     const targetApo = isFinite(target.apoapsis.min) ? target.apoapsis.min : 100_000;
     const dv = Math.sqrt(2 * 9.80665 * targetApo) * 1.15;
     return dv;
   }
 
-  // Mid-point of target orbit (safe now — no Infinity values)
+  // Mid-point of target orbit
   const targetPeri = (target.periapsis.min + target.periapsis.max) / 2;
   const targetApo = (target.apoapsis.min + target.apoapsis.max) / 2;
   const targetR = EARTH_RADIUS + (targetPeri + targetApo) / 2;
 
-  // If target is LEO, just return insertion cost
   if (targetR < EARTH_RADIUS + 2000e3) {
     return leoInsertionDv;
   }
 
-  // LEO parking orbit at 200km
   const leoR = EARTH_RADIUS + 200e3;
   const transfer = hohmannDeltaV(leoR, targetR);
 
@@ -61,17 +70,52 @@ export function scoreFlightResult(
 
   // Budget: How much under budget
   const budgetRatio = 1 - rocketCost / mission.budget;
-  const budgetScore = Math.round(clamp(budgetRatio * 100 + 50, 0, 100)); // 50% of budget = 100 score
+  const budgetScore = Math.round(clamp(budgetRatio * 100 + 50, 0, 100));
   const percentUnderBudget = Math.max(0, budgetRatio * 100);
 
-  // Accuracy: How close to target orbit
+  // Accuracy: depends on mission type
   let accuracyScore = 0;
-  if (mission.requirements.targetOrbit && flight.finalOrbit) {
+
+  if (mission.requirements.targetBody && flight.closestApproach) {
+    // Target body missions: score based on closest approach
+    const targetId = mission.requirements.targetBody;
+    const closestDist = flight.closestApproach[targetId];
+
+    if (closestDist !== undefined) {
+      // Flyby scoring: closer approach = better
+      const isFlyby = flight.outcome === "target_reached";
+      const isOrbit = flight.outcome === "mission_complete" && flight.finalOrbit?.referenceBody === targetId;
+
+      if (isOrbit) {
+        // Orbit around target body — full marks
+        accuracyScore = 95;
+      } else if (isFlyby) {
+        // Flyby: score based on how close. Perfect = within 500km of body surface
+        const bodyRadii: Record<string, number> = {
+          moon: 1.737e6,
+          mars: 3.3895e6,
+          jupiter: 69.911e6,
+          saturn: 58.232e6,
+        };
+        const bodyR = bodyRadii[targetId] ?? 1e6;
+        const surfaceDist = Math.max(0, closestDist - bodyR);
+        const perfectDist = 500_000; // 500km
+        const maxDist = 50_000_000; // 50,000km — still counts but low score
+        if (surfaceDist <= perfectDist) {
+          accuracyScore = 100;
+        } else {
+          const ratio = 1 - Math.min(1, (surfaceDist - perfectDist) / (maxDist - perfectDist));
+          accuracyScore = Math.round(40 + ratio * 60);
+        }
+      } else if (flight.outcome === "mission_complete") {
+        accuracyScore = 90; // Landing or other mission_complete
+      }
+    }
+  } else if (mission.requirements.targetOrbit && flight.finalOrbit) {
     const target = mission.requirements.targetOrbit;
     const isSuborbital = !isFinite(target.periapsis.min) || !isFinite(target.periapsis.max);
 
     if (isSuborbital) {
-      // For suborbital missions, score based on how well apoapsis was reached
       const targetApo = isFinite(target.apoapsis.min) ? target.apoapsis.min : 100_000;
       const apoRatio = Math.min(1, flight.maxAltitude / targetApo);
       accuracyScore = Math.round(apoRatio * 100);
@@ -83,13 +127,17 @@ export function scoreFlightResult(
       const apoError = Math.abs(flight.finalOrbit.apoapsis - targetApoMid);
       const avgError = (periError + apoError) / 2;
 
-      // Tolerance: within 10km = 100%, scaled down from there
-      const tolerance = 10_000; // 10km
+      const tolerance = 10_000;
       const errorRatio = 1 - Math.min(1, avgError / (tolerance * 10));
       accuracyScore = Math.round(clamp(errorRatio * 100, 0, 100));
     }
-  } else if (flight.outcome === "orbit_achieved" || flight.outcome === "mission_complete") {
-    accuracyScore = 75; // Partial credit for achieving any orbit
+  } else if (
+    flight.outcome === "orbit_achieved" ||
+    flight.outcome === "mission_complete" ||
+    flight.outcome === "target_reached" ||
+    flight.outcome === "escaped"
+  ) {
+    accuracyScore = 75;
   }
 
   // Failed missions get heavy penalties
@@ -124,7 +172,7 @@ export function scoreFlightResult(
           ? Math.abs(flight.finalOrbit.periapsis - mission.requirements.targetOrbit.periapsis.min)
           : Math.abs(flight.maxAltitude - (mission.requirements.targetOrbit.apoapsis.min ?? 0))
         : Infinity,
-      inclinationError: 0, // 2D sim — always 0
+      inclinationError: 0,
     },
     totalScore,
     stars,

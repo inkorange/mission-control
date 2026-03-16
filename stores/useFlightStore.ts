@@ -62,7 +62,7 @@ export const useFlightStore = create<FlightState>((set) => ({
   },
 
   setTimeScale: (scale: number) => {
-    set({ timeScale: Math.max(1, Math.min(100, scale)) });
+    set({ timeScale: Math.max(1, Math.min(10000, scale)) });
   },
 
   pause: () => set({ isPaused: true }),

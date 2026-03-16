@@ -17,6 +17,9 @@ function makeSnapshot(overrides: Partial<FlightSnapshot> = {}): FlightSnapshot {
     pitchAngle: 0,
     orbitalElements: null,
     position: { x: 6_371_000, y: 0 },
+    currentSOIBody: "earth",
+    distanceToTarget: null,
+    bodyPositions: {},
     ...overrides,
   };
 }
@@ -79,6 +82,7 @@ function makeFlight(overrides: Partial<FlightResult> = {}): FlightResult {
     totalDeltaVUsed: 9500,
     maxAltitude: 200_000,
     flightDuration: 300,
+    closestApproach: {},
     ...overrides,
   };
 }

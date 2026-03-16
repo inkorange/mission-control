@@ -36,6 +36,7 @@ describe("rk4Step", () => {
       time: 0,
       altitude: alt,
       fuel: 0,
+      closestApproach: {} as Record<string, number>,
     };
 
     const dt = 1; // 1 second steps
@@ -65,6 +66,7 @@ describe("rk4Step", () => {
       time: 0,
       altitude: alt,
       fuel: 0,
+      closestApproach: {} as Record<string, number>,
     };
 
     const dt = 1;
@@ -86,6 +88,7 @@ describe("rk4Step", () => {
       time: 0,
       altitude: 200e3,
       fuel: 0,
+      closestApproach: {} as Record<string, number>,
     };
 
     const result = rk4Step(state, 0.5, { x: 0, y: 0 }, 0, 0);
@@ -104,6 +107,7 @@ describe("rk4Step", () => {
       time: 0,
       altitude: alt,
       fuel: 0,
+      closestApproach: {} as Record<string, number>,
     };
 
     // Propagate for 1000 seconds

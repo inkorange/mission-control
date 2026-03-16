@@ -10,6 +10,8 @@ import { ENGINES } from "@/engine/data/engines";
 import TelemetryHUD from "@/components/launch/TelemetryHUD";
 import FlightControls from "@/components/launch/FlightControls";
 import FlightScene3D from "@/components/launch/FlightScene3D";
+import PitchArcControl from "@/components/launch/PitchArcControl";
+import FlightAdvisory from "@/components/launch/FlightAdvisory";
 import EventLog from "@/components/launch/EventLog";
 import {
   formatDistance,
@@ -56,6 +58,7 @@ export default function LaunchPage({
 
   const [launchPhase, setLaunchPhase] = useState<"idle" | "countdown" | "flight">("idle");
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [pitchValue, setPitchValue] = useState(0);
   const countdownStartRef = useRef<number>(0);
   const countdownRafRef = useRef<number>(0);
 
@@ -97,6 +100,14 @@ export default function LaunchPage({
       cancelAnimationFrame(countdownRafRef.current);
     };
   }, [launchPhase, start]);
+
+  const handlePitchChange = useCallback(
+    (degrees: number) => {
+      setPitchValue(degrees);
+      setPitch(degrees);
+    },
+    [setPitch]
+  );
 
   const hasLaunched = launchPhase === "flight";
 
@@ -142,8 +153,13 @@ export default function LaunchPage({
   const currentStage = currentSnapshot?.currentStage ?? 0;
 
   // Status indicator
+  const isSuccessOutcome = result?.outcome === "mission_complete" ||
+    result?.outcome === "orbit_achieved" ||
+    result?.outcome === "target_reached" ||
+    result?.outcome === "escaped";
+
   const flightStatus = result
-    ? result.outcome === "mission_complete" || result.outcome === "orbit_achieved"
+    ? isSuccessOutcome
       ? { label: "Complete", color: "var(--nasa-green)", dot: "active" }
       : { label: "Terminated", color: "var(--nasa-red)", dot: "danger" }
     : isPaused
@@ -230,7 +246,22 @@ export default function LaunchPage({
       <div className="flex-1 flex overflow-hidden">
         {/* Center: Trajectory visualization */}
         <div className="flex-1 relative">
-          <FlightScene3D targetOrbit={mission.requirements.targetOrbit} />
+          <FlightScene3D targetOrbit={mission.requirements.targetOrbit} mission={mission} />
+
+          {/* Pitch arc overlay */}
+          {hasLaunched && !result && (
+            <>
+              <PitchArcControl
+                pitch={pitchValue}
+                onPitchChange={handlePitchChange}
+              />
+              <FlightAdvisory
+                snapshot={currentSnapshot}
+                pitch={pitchValue}
+                hasResult={!!result}
+              />
+            </>
+          )}
 
           {/* Pre-launch overlay */}
           {launchPhase !== "flight" && (
@@ -323,8 +354,7 @@ export default function LaunchPage({
                 <div className="text-center mb-5">
                   <span
                     className={`font-mono text-[1rem] tracking-[0.2em] uppercase font-bold block ${
-                      result.outcome === "mission_complete" ||
-                      result.outcome === "orbit_achieved"
+                      isSuccessOutcome
                         ? "text-[var(--nasa-green)]"
                         : "text-[var(--nasa-red)]"
                     }`}
@@ -333,13 +363,17 @@ export default function LaunchPage({
                       ? "Mission Complete"
                       : result.outcome === "orbit_achieved"
                         ? "Orbit Achieved"
-                        : result.outcome === "crash"
-                          ? "Vehicle Lost"
-                          : result.outcome === "aborted"
-                            ? "Mission Aborted"
-                            : result.outcome === "suborbital"
-                              ? "Suborbital Only"
-                              : "Fuel Exhausted"}
+                        : result.outcome === "target_reached"
+                          ? "Target Reached"
+                          : result.outcome === "escaped"
+                            ? "Escape Achieved"
+                            : result.outcome === "crash"
+                              ? "Vehicle Lost"
+                              : result.outcome === "aborted"
+                                ? "Mission Aborted"
+                                : result.outcome === "suborbital"
+                                  ? "Suborbital Only"
+                                  : "Fuel Exhausted"}
                   </span>
                   <div className="nasa-stripe mt-3" />
                 </div>
@@ -382,9 +416,9 @@ export default function LaunchPage({
                   </Link>
                   <Link
                     href={`/builder/${missionId}`}
-                    className="flex-1 text-center font-mono text-[0.8rem] tracking-[0.1em] uppercase py-2.5 border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30 rounded-sm transition-colors"
+                    className="flex-1 text-center font-mono text-[0.8rem] tracking-[0.1em] uppercase py-2.5 border border-[var(--nasa-gold)]/40 text-[var(--nasa-gold)] hover:bg-[var(--nasa-gold)]/10 hover:border-[var(--nasa-gold)] rounded-sm transition-colors"
                   >
-                    Rebuild
+                    Retry
                   </Link>
                 </div>
               </div>
@@ -405,6 +439,7 @@ export default function LaunchPage({
               initialFuel={rocketConfig.stages[0]?.fuelMass ?? 0}
               initialMass={rocketConfig.totalMass}
               fuelCapacity={rocketConfig.stages[0]?.fuelCapacity ?? 0}
+              targetBody={mission.requirements.targetBody}
             />
           </div>
 
@@ -416,7 +451,7 @@ export default function LaunchPage({
               </span>
               <FlightControls
                 onThrottleChange={setThrottle}
-                onPitchChange={setPitch}
+                onPitchChange={handlePitchChange}
                 onStaging={triggerStaging}
                 onAbort={abort}
                 onWarpChange={setWarp}
