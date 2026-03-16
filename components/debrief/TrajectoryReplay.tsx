@@ -155,6 +155,59 @@ export default function TrajectoryReplay({
       });
   }, [keyEvents, history, maxAlt]);
 
+  // Compute a zoomed viewBox that fits the flight path with padding
+  const zoomedViewBox = useMemo(() => {
+    if (pathPoints.length === 0) return { vb: `0 0 ${viewSize} ${viewSize}`, size: viewSize };
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const s of pathPoints) {
+      const { sx, sy } = toSvg(s.position, s.altitude);
+      if (sx < minX) minX = sx;
+      if (sx > maxX) maxX = sx;
+      if (sy < minY) minY = sy;
+      if (sy > maxY) maxY = sy;
+    }
+
+    // Include the Earth's edge nearest to the trajectory for context
+    // Find the closest point on Earth's circle to the trajectory center
+    const trajCx = (minX + maxX) / 2;
+    const trajCy = (minY + maxY) / 2;
+    const dx = trajCx - cx;
+    const dy = trajCy - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const earthEdgeX = cx + (dx / dist) * earthVisualR;
+    const earthEdgeY = cy + (dy / dist) * earthVisualR;
+
+    // Include just the nearest Earth edge for context (not deep into the planet)
+    const earthPadX1 = cx + (dx / dist) * earthVisualR * 0.92;
+    const earthPadY1 = cy + (dy / dist) * earthVisualR * 0.92;
+    minX = Math.min(minX, earthEdgeX, earthPadX1);
+    maxX = Math.max(maxX, earthEdgeX, earthPadX1);
+    minY = Math.min(minY, earthEdgeY, earthPadY1);
+    maxY = Math.max(maxY, earthEdgeY, earthPadY1);
+
+    // Add padding (10% of the bounding box size) — tight zoom on flight path
+    const padX = (maxX - minX) * 0.1;
+    const padY = (maxY - minY) * 0.1;
+    minX -= padX;
+    minY -= padY;
+    maxX += padX;
+    maxY += padY;
+
+    // Make it square (use the larger dimension)
+    const w = maxX - minX;
+    const h = maxY - minY;
+    const size = Math.max(w, h);
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    return { vb: `${(centerX - size / 2).toFixed(1)} ${(centerY - size / 2).toFixed(1)} ${size.toFixed(1)} ${size.toFixed(1)}`, size };
+  }, [pathPoints, maxAlt]);
+
+  // Scale factor so strokes/fonts stay consistent regardless of zoom level
+  // Normalizes to look as if rendered in the full 600px viewBox
+  const zoomScale = zoomedViewBox.size / viewSize;
+
   // Stars (deterministic scatter)
   const stars = useMemo(
     () =>
@@ -169,7 +222,7 @@ export default function TrajectoryReplay({
 
   return (
     <svg
-      viewBox={`0 0 ${viewSize} ${viewSize}`}
+      viewBox={zoomedViewBox.vb}
       className="w-full"
       preserveAspectRatio="xMidYMid meet"
     >
@@ -198,15 +251,15 @@ export default function TrajectoryReplay({
             r={altToVisual(targetApoAvg)}
             fill="none"
             stroke="var(--nasa-green)"
-            strokeWidth="1.5"
-            strokeDasharray="6 4"
+            strokeWidth={1.5 * zoomScale}
+            strokeDasharray={`${6 * zoomScale} ${4 * zoomScale}`}
             opacity="0.35"
           />
           <text
             x={cx}
-            y={cy - altToVisual(targetApoAvg) - 5}
+            y={cy - altToVisual(targetApoAvg) - 5 * zoomScale}
             textAnchor="middle"
-            fontSize="8"
+            fontSize={11 * zoomScale}
             fill="var(--nasa-green)"
             opacity="0.6"
             className="font-mono"
@@ -222,8 +275,8 @@ export default function TrajectoryReplay({
           r={altToVisual(targetPeriAvg)}
           fill="none"
           stroke="var(--nasa-green)"
-          strokeWidth="0.5"
-          strokeDasharray="4 4"
+          strokeWidth={0.5 * zoomScale}
+          strokeDasharray={`${4 * zoomScale} ${4 * zoomScale}`}
           opacity="0.25"
         />
       )}
@@ -235,14 +288,14 @@ export default function TrajectoryReplay({
         r={karmanVisualR}
         fill="none"
         stroke="#4da6ff"
-        strokeWidth="0.5"
-        strokeDasharray="4 3"
+        strokeWidth={0.5 * zoomScale}
+        strokeDasharray={`${4 * zoomScale} ${3 * zoomScale}`}
         opacity="0.25"
       />
       <text
-        x={cx + karmanVisualR + 4}
-        y={cy - 2}
-        fontSize="7"
+        x={cx + karmanVisualR + 4 * zoomScale}
+        y={cy - 2 * zoomScale}
+        fontSize={10 * zoomScale}
         fill="#4da6ff"
         opacity="0.35"
         className="font-mono"
@@ -257,16 +310,16 @@ export default function TrajectoryReplay({
         r={earthVisualR}
         fill="url(#earthGradReplay)"
         stroke="#1a4a7a"
-        strokeWidth="1"
+        strokeWidth={1 * zoomScale}
       />
       {/* Atmosphere glow */}
       <circle
         cx={cx}
         cy={cy}
-        r={earthVisualR + 2}
+        r={earthVisualR + 2 * zoomScale}
         fill="none"
         stroke="#4da6ff"
-        strokeWidth="3"
+        strokeWidth={3 * zoomScale}
         opacity="0.08"
       />
 
@@ -280,14 +333,14 @@ export default function TrajectoryReplay({
             ry={finalOrbitGeo.b}
             fill="none"
             stroke="var(--data)"
-            strokeWidth="1"
+            strokeWidth={1 * zoomScale}
             opacity="0.4"
           />
           {/* Ap label */}
           <text
-            x={cx - finalOrbitGeo.cOffset + finalOrbitGeo.a + 6}
-            y={cy + 3}
-            fontSize="7"
+            x={cx - finalOrbitGeo.cOffset + finalOrbitGeo.a + 6 * zoomScale}
+            y={cy + 3 * zoomScale}
+            fontSize={10 * zoomScale}
             fill="var(--data)"
             opacity="0.6"
             className="font-mono"
@@ -297,9 +350,9 @@ export default function TrajectoryReplay({
           {/* Pe label */}
           {finalOrbitGeo.periAlt > 0 && (
             <text
-              x={cx - finalOrbitGeo.cOffset - finalOrbitGeo.a - 6}
-              y={cy + 3}
-              fontSize="7"
+              x={cx - finalOrbitGeo.cOffset - finalOrbitGeo.a - 6 * zoomScale}
+              y={cy + 3 * zoomScale}
+              fontSize={10 * zoomScale}
               fill={finalOrbitGeo.periAlt > KARMAN_LINE ? "var(--nasa-green)" : "var(--nasa-red)"}
               opacity="0.6"
               textAnchor="end"
@@ -317,7 +370,7 @@ export default function TrajectoryReplay({
           points={pathString}
           fill="none"
           stroke={isSuccess ? "var(--data)" : "var(--nasa-red)"}
-          strokeWidth="2"
+          strokeWidth={2 * zoomScale}
           strokeLinecap="round"
           strokeLinejoin="round"
           opacity="0.8"
@@ -332,15 +385,15 @@ export default function TrajectoryReplay({
             <circle
               cx={sx}
               cy={sy}
-              r="3"
+              r={3 * zoomScale}
               fill="none"
               stroke="var(--nasa-gold)"
-              strokeWidth="1"
+              strokeWidth={1 * zoomScale}
             />
             <text
-              x={sx + 6}
-              y={sy - 4}
-              fontSize="7"
+              x={sx + 6 * zoomScale}
+              y={sy - 4 * zoomScale}
+              fontSize={10 * zoomScale}
               fill="var(--nasa-gold)"
               opacity="0.7"
               className="font-mono"
@@ -365,11 +418,11 @@ export default function TrajectoryReplay({
         if (ev.type === "stage_separation") return null;
         return (
           <g key={`ev-${i}`}>
-            <circle cx={ev.sx} cy={ev.sy} r="2.5" fill={color} opacity="0.8" />
+            <circle cx={ev.sx} cy={ev.sy} r={2.5 * zoomScale} fill={color} opacity="0.8" />
             <text
-              x={ev.sx + 6}
-              y={ev.sy - 4}
-              fontSize="7"
+              x={ev.sx + 6 * zoomScale}
+              y={ev.sy - 4 * zoomScale}
+              fontSize={10 * zoomScale}
               fill={color}
               opacity="0.8"
               className="font-mono"
@@ -385,11 +438,11 @@ export default function TrajectoryReplay({
         const { sx, sy } = toSvg(history[0].position, history[0].altitude);
         return (
           <>
-            <circle cx={sx} cy={sy} r="3.5" fill="var(--nasa-green)" />
+            <circle cx={sx} cy={sy} r={3.5 * zoomScale} fill="var(--nasa-green)" />
             <text
-              x={sx + 6}
-              y={sy + 3}
-              fontSize="7"
+              x={sx + 6 * zoomScale}
+              y={sy + 3 * zoomScale}
+              fontSize={10 * zoomScale}
               fill="var(--nasa-green)"
               opacity="0.7"
               className="font-mono"
@@ -408,40 +461,52 @@ export default function TrajectoryReplay({
           <circle
             cx={sx}
             cy={sy}
-            r="4"
+            r={4 * zoomScale}
             fill={isSuccess ? "var(--nasa-green)" : "var(--nasa-red)"}
           />
         );
       })()}
 
-      {/* Outcome label */}
-      <text
-        x={cx}
-        y={24}
-        textAnchor="middle"
-        fontSize="10"
-        fontWeight="bold"
-        fill={isSuccess ? "var(--nasa-green)" : "var(--nasa-red)"}
-        className="font-mono"
-        opacity="0.7"
-      >
-        {isSuccess
-          ? "MISSION COMPLETE"
-          : outcome.toUpperCase().replace("_", " ")}
-      </text>
+      {/* Outcome label — positioned relative to the zoomed viewBox */}
+      {(() => {
+        const parts = zoomedViewBox.vb.split(" ").map(Number);
+        const vbX = parts[0], vbY = parts[1], vbSize = parts[2];
+        return (
+          <text
+            x={vbX + vbSize / 2}
+            y={vbY + 14 * zoomScale}
+            textAnchor="middle"
+            fontSize={14 * zoomScale}
+            fontWeight="bold"
+            fill={isSuccess ? "var(--nasa-green)" : "var(--nasa-red)"}
+            className="font-mono"
+            opacity="0.7"
+          >
+            {isSuccess
+              ? "MISSION COMPLETE"
+              : outcome.toUpperCase().replace("_", " ")}
+          </text>
+        );
+      })()}
 
       {/* Altitude scale reference */}
-      <text
-        x={viewSize - 8}
-        y={viewSize - 8}
-        textAnchor="end"
-        fontSize="7"
-        fill="var(--muted)"
-        className="font-mono"
-        opacity="0.35"
-      >
-        Altitude scale exaggerated
-      </text>
+      {(() => {
+        const parts = zoomedViewBox.vb.split(" ").map(Number);
+        const vbX = parts[0], vbSize = parts[2], vbY = parts[1];
+        return (
+          <text
+            x={vbX + vbSize - 4 * zoomScale}
+            y={vbY + vbSize - 4 * zoomScale}
+            textAnchor="end"
+            fontSize={10 * zoomScale}
+            fill="var(--muted)"
+            className="font-mono"
+            opacity="0.35"
+          >
+            Altitude scale exaggerated
+          </text>
+        );
+      })()}
     </svg>
   );
 }

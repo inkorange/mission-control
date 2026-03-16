@@ -27,6 +27,7 @@ export interface FlightSnapshot {
   time: number;
   altitude: number;
   velocity: number;
+  velocityVector?: Vector2D;
   downrangeDistance: number;
   mass: number;
   fuel: number;

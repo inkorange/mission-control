@@ -11,6 +11,8 @@ interface FlightControlsProps {
   onWarpChange: (scale: number) => void;
   stageCount: number;
   currentStage: number;
+  autopilot: boolean;
+  onAutopilotToggle: (enabled: boolean) => void;
 }
 
 const WARP_OPTIONS = [1, 5, 10, 50, 100, 1000, 10000];
@@ -23,6 +25,8 @@ export default function FlightControls({
   onWarpChange,
   stageCount,
   currentStage,
+  autopilot,
+  onAutopilotToggle,
 }: FlightControlsProps) {
   const { isPaused, pause, resume, timeScale, isActive } = useFlightStore();
   const [throttle, setThrottle] = useState(100);
@@ -46,20 +50,36 @@ export default function FlightControls({
       // Don't capture when typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
-      switch (e.key.toLowerCase()) {
+      switch (e.key) {
         case " ":
           e.preventDefault();
           isPaused ? resume() : pause();
           break;
+        case "ArrowLeft":
+          e.preventDefault();
+          handleThrottleChange(Math.max(0, throttle - 1));
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          handleThrottleChange(Math.min(100, throttle + 1));
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          handlePitchChange(Math.min(90, pitch + 1));
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          handlePitchChange(Math.max(0, pitch - 1));
+          break;
         case "z":
+        case "Z":
           handleThrottleChange(Math.max(0, throttle - 10));
           break;
         case "x":
+        case "X":
           handleThrottleChange(Math.min(100, throttle + 10));
           break;
-        case "s":
-          if (canStage) onStaging();
-          break;
+        // S key removed — staging is automatic
         case "1":
           onWarpChange(1);
           break;
@@ -83,7 +103,7 @@ export default function FlightControls({
           break;
       }
     },
-    [isPaused, pause, resume, throttle, canStage, onStaging, onWarpChange, handleThrottleChange]
+    [isPaused, pause, resume, throttle, pitch, canStage, onStaging, onWarpChange, handleThrottleChange, handlePitchChange]
   );
 
   useEffect(() => {
@@ -94,10 +114,10 @@ export default function FlightControls({
   return (
     <div className="space-y-3">
       {/* Throttle */}
-      <div>
+      <div className={autopilot ? "opacity-40 pointer-events-none" : ""}>
         <div className="flex items-center justify-between mb-1">
           <span className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-[var(--muted)]">
-            Throttle
+            Throttle {autopilot ? "(auto)" : ""}
           </span>
           <span className="font-mono text-[0.7rem] text-[var(--data)]">
             {throttle}%
@@ -132,11 +152,30 @@ export default function FlightControls({
         </div>
       </div>
 
-      {/* Pitch */}
+      {/* Autopilot toggle */}
       <div>
+        <button
+          onClick={() => onAutopilotToggle(!autopilot)}
+          className={`w-full py-2 font-mono text-[0.7rem] tracking-[0.1em] uppercase rounded-sm border transition-colors ${
+            autopilot
+              ? "border-[var(--nasa-green)] bg-[var(--nasa-green)]/15 text-[var(--nasa-green)]"
+              : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30"
+          }`}
+        >
+          {autopilot ? "Autopilot Active" : "Enable Autopilot"}
+        </button>
+        {autopilot && (
+          <p className="font-mono text-[0.5rem] text-[var(--nasa-green)]/70 mt-1 leading-snug">
+            Full auto: pitch, throttle &amp; staging are controlled automatically.
+          </p>
+        )}
+      </div>
+
+      {/* Pitch */}
+      <div className={autopilot ? "opacity-40 pointer-events-none" : ""}>
         <div className="flex items-center justify-between mb-1">
           <span className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-[var(--muted)]">
-            Pitch
+            Pitch {autopilot ? "(auto)" : ""}
           </span>
           <span className="font-mono text-[0.7rem] text-[var(--data)]">
             {pitch}°
@@ -197,18 +236,13 @@ export default function FlightControls({
           {isPaused ? "Resume" : "Pause"}
         </button>
 
-        {/* Stage Separation */}
-        <button
-          onClick={onStaging}
-          disabled={!canStage}
-          className={`w-full py-2 font-mono text-[0.75rem] tracking-[0.1em] uppercase rounded-sm border transition-colors ${
-            canStage
-              ? "border-[var(--nasa-gold)]/40 text-[var(--nasa-gold)] hover:bg-[var(--nasa-gold)]/10 hover:border-[var(--nasa-gold)]"
-              : "border-[var(--border)] text-[var(--muted)] cursor-not-allowed opacity-50"
-          }`}
-        >
-          Stage Separation
-        </button>
+        {/* Stage info */}
+        <div className="flex items-center gap-2 py-1">
+          <span className="status-dot status-dot--active" />
+          <span className="font-mono text-[0.55rem] tracking-wider text-[var(--muted)]">
+            Auto-staging enabled
+          </span>
+        </div>
 
         {/* Abort */}
         <button
@@ -222,7 +256,7 @@ export default function FlightControls({
       {/* Keyboard shortcuts hint */}
       <div className="pt-2 border-t border-[var(--border)]">
         <p className="font-mono text-[0.5rem] tracking-wider text-[var(--muted)]/60 leading-relaxed">
-          SPC=Pause &middot; Z/X=Throttle &middot; S=Stage &middot; 1-7=Warp
+          ←→=Throttle &middot; ↑↓=Pitch &middot; SPC=Pause &middot; 1-7=Warp
         </p>
       </div>
     </div>

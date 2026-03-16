@@ -12,6 +12,7 @@ import FlightControls from "@/components/launch/FlightControls";
 import FlightScene3D from "@/components/launch/FlightScene3D";
 import PitchArcControl from "@/components/launch/PitchArcControl";
 import FlightAdvisory from "@/components/launch/FlightAdvisory";
+import GuidanceTimeline from "@/components/launch/GuidanceTimeline";
 import EventLog from "@/components/launch/EventLog";
 import {
   formatDistance,
@@ -59,6 +60,9 @@ export default function LaunchPage({
   const [launchPhase, setLaunchPhase] = useState<"idle" | "countdown" | "flight">("idle");
   const [countdown, setCountdown] = useState<number | null>(null);
   const [pitchValue, setPitchValue] = useState(0);
+  const [targetPitchValue, setTargetPitchValue] = useState(0);
+  const [throttleValue, setThrottleValue] = useState(100);
+  const [autopilot, setAutopilot] = useState(false);
   const countdownStartRef = useRef<number>(0);
   const countdownRafRef = useRef<number>(0);
 
@@ -101,6 +105,14 @@ export default function LaunchPage({
     };
   }, [launchPhase, start]);
 
+  const handleThrottleChange = useCallback(
+    (value: number) => {
+      setThrottleValue(Math.round(value * 100));
+      setThrottle(value);
+    },
+    [setThrottle]
+  );
+
   const handlePitchChange = useCallback(
     (degrees: number) => {
       setPitchValue(degrees);
@@ -108,6 +120,94 @@ export default function LaunchPage({
     },
     [setPitch]
   );
+
+  const stageCount = rocketConfig.stages.length;
+
+  // Autopilot: pitch, throttle, and staging
+  const lastAutoStageRef = useRef(-1);
+  const pitchRef = useRef(0);
+  const throttleRef = useRef(100);
+  useEffect(() => {
+    if (!autopilot || !currentSnapshot || result) return;
+
+    const alt = currentSnapshot.altitude;
+    const vel = currentSnapshot.velocity;
+    const fuel = currentSnapshot.fuel;
+    const stage = currentSnapshot.currentStage;
+
+    // === PITCH: altitude-based gravity turn ===
+    const pitchProfile: [number, number][] = [
+      [0, 0],
+      [3_000, 0],
+      [5_000, 5],
+      [10_000, 15],
+      [20_000, 28],
+      [40_000, 42],
+      [60_000, 52],
+      [80_000, 62],
+      [100_000, 72],
+      [120_000, 82],
+      [140_000, 87],
+      [160_000, 89],
+      [180_000, 90],
+    ];
+
+    let targetPitch = 0;
+
+    if (alt >= pitchProfile[pitchProfile.length - 1][0]) {
+      targetPitch = 90;
+    } else {
+      for (let i = 1; i < pitchProfile.length; i++) {
+        if (alt <= pitchProfile[i][0]) {
+          const [a0, p0] = pitchProfile[i - 1];
+          const [a1, p1] = pitchProfile[i];
+          const t = (alt - a0) / (a1 - a0);
+          targetPitch = p0 + t * (p1 - p0);
+          break;
+        }
+      }
+    }
+
+    // Store the raw target for the guidance graph
+    const roundedTarget = Math.round(targetPitch);
+    setTargetPitchValue(roundedTarget);
+
+    // Set pitch — use ref to avoid dependency loop
+    if (roundedTarget !== pitchRef.current) {
+      pitchRef.current = roundedTarget;
+      setPitchValue(roundedTarget);
+      setPitch(roundedTarget);
+    }
+
+    // === THROTTLE: continuous burn until orbit achieved ===
+    const orb = currentSnapshot.orbitalElements;
+    let targetThrottle = 1.0;
+
+    if (orb && alt > 100_000) {
+      if (orb.periapsis > 170_000 && orb.apoapsis > 170_000) {
+        targetThrottle = 0; // Orbit achieved — cut engines
+      }
+    }
+
+    const throttlePercent = Math.round(targetThrottle * 100);
+    if (throttlePercent !== throttleRef.current) {
+      throttleRef.current = throttlePercent;
+      setThrottleValue(throttlePercent);
+      setThrottle(targetThrottle);
+    }
+
+  }, [autopilot, currentSnapshot, result, setPitch, setThrottle]);
+
+  // Auto-staging: always jettison spent stages (regardless of autopilot)
+  useEffect(() => {
+    if (!currentSnapshot || result) return;
+    const fuel = currentSnapshot.fuel;
+    const stage = currentSnapshot.currentStage;
+    if (fuel <= 0 && stage < stageCount - 1 && stage !== lastAutoStageRef.current) {
+      lastAutoStageRef.current = stage;
+      triggerStaging();
+    }
+  }, [currentSnapshot, result, stageCount, triggerStaging]);
 
   const hasLaunched = launchPhase === "flight";
 
@@ -149,7 +249,6 @@ export default function LaunchPage({
   const alt = currentSnapshot?.altitude ?? 0;
   const vel = currentSnapshot?.velocity ?? 0;
   const time = currentSnapshot?.time ?? 0;
-  const stageCount = rocketConfig.stages.length;
   const currentStage = currentSnapshot?.currentStage ?? 0;
 
   // Status indicator
@@ -255,6 +354,13 @@ export default function LaunchPage({
                 pitch={pitchValue}
                 onPitchChange={handlePitchChange}
               />
+              <GuidanceTimeline
+                snapshot={currentSnapshot}
+                pitch={pitchValue}
+                targetPitch={autopilot ? targetPitchValue : pitchValue}
+                throttle={throttleValue}
+                hasResult={!!result}
+              />
               <FlightAdvisory
                 snapshot={currentSnapshot}
                 pitch={pitchValue}
@@ -299,10 +405,24 @@ export default function LaunchPage({
                       </div>
 
                       <p className="font-mono text-[0.625rem] tracking-wider text-[var(--muted)] mb-4">
-                        Use throttle and pitch controls to perform your gravity turn.
+                        {autopilot
+                          ? "Autopilot will handle pitch, throttle, and staging automatically."
+                          : "Use throttle and pitch controls to perform your gravity turn."}
                         <br />
-                        Stage separation is manual — watch your fuel!
+                        Stage separation is automatic.
                       </p>
+
+                      {/* Autopilot toggle */}
+                      <button
+                        onClick={() => setAutopilot(!autopilot)}
+                        className={`w-full py-2.5 mb-3 font-mono text-[0.75rem] tracking-[0.1em] uppercase rounded-sm border transition-colors ${
+                          autopilot
+                            ? "border-[var(--nasa-green)] bg-[var(--nasa-green)]/15 text-[var(--nasa-green)]"
+                            : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30"
+                        }`}
+                      >
+                        {autopilot ? "Autopilot Enabled" : "Enable Autopilot"}
+                      </button>
 
                       <button
                         onClick={beginCountdown}
@@ -443,6 +563,30 @@ export default function LaunchPage({
             />
           </div>
 
+          {/* Autopilot toggle — available during countdown and flight */}
+          {launchPhase === "countdown" && (
+            <div className="p-3 border-b border-[var(--border)]">
+              <span className="font-mono text-[0.625rem] tracking-[0.15em] uppercase text-[var(--nasa-red)] block mb-2">
+                Flight Mode
+              </span>
+              <button
+                onClick={() => setAutopilot(!autopilot)}
+                className={`w-full py-2.5 font-mono text-[0.75rem] tracking-[0.1em] uppercase rounded-sm border transition-colors ${
+                  autopilot
+                    ? "border-[var(--nasa-green)] bg-[var(--nasa-green)]/15 text-[var(--nasa-green)]"
+                    : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30"
+                }`}
+              >
+                {autopilot ? "Autopilot Enabled" : "Enable Autopilot"}
+              </button>
+              {autopilot && (
+                <p className="font-mono text-[0.5rem] text-[var(--nasa-green)]/70 mt-1.5 leading-snug">
+                  Full auto: pitch, throttle &amp; staging controlled automatically.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Controls */}
           {hasLaunched && !result && (
             <div className="p-3 border-b border-[var(--border)]">
@@ -450,13 +594,15 @@ export default function LaunchPage({
                 Flight Controls
               </span>
               <FlightControls
-                onThrottleChange={setThrottle}
+                onThrottleChange={handleThrottleChange}
                 onPitchChange={handlePitchChange}
                 onStaging={triggerStaging}
                 onAbort={abort}
                 onWarpChange={setWarp}
                 stageCount={stageCount}
                 currentStage={currentStage}
+                autopilot={autopilot}
+                onAutopilotToggle={setAutopilot}
               />
             </div>
           )}

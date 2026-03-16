@@ -1,4 +1,4 @@
-import { EARTH_RADIUS, FIXED_DT, DEFAULT_DRAG_COEFFICIENT, DEFAULT_CROSS_SECTION, G0 } from "../physics/constants";
+import { EARTH_RADIUS, EARTH_MU, FIXED_DT, DEFAULT_DRAG_COEFFICIENT, DEFAULT_CROSS_SECTION, G0 } from "../physics/constants";
 import { rk4Step, createLaunchState } from "../physics/trajectory";
 import type { GravBody } from "../physics/trajectory";
 import { massFlowRate } from "../physics/tsiolkovsky";
@@ -516,6 +516,23 @@ export class FlightSimulator {
 
     // Earth orbit checks (for missions without targetBody)
     if (!this.mission.requirements.targetBody && this.state.altitude > 100_000) {
+      const r = magnitude(this.state.position);
+      const v = magnitude(this.state.velocity);
+      const vCircular = Math.sqrt(EARTH_MU / r);
+
+      // Velocity-based orbit check: if going fast enough for orbit at this altitude
+      // This is more forgiving than periapsis checks — catches orbits with slight vertical velocity
+      if (v >= vCircular * 0.99) {
+        this.outcome = this.mission.requirements.targetOrbit ? "mission_complete" : "orbit_achieved";
+        this.isRunning = false;
+        this.events.push({
+          time: this.state.time,
+          type: "orbit_achieved",
+          description: `Orbit achieved at ${(this.state.altitude / 1000).toFixed(0)}km! Velocity: ${v.toFixed(0)} m/s (orbital: ${vCircular.toFixed(0)} m/s)`,
+        });
+        return;
+      }
+
       const elements = orbitalElementsFromState(
         this.state.position,
         this.state.velocity
@@ -541,17 +558,17 @@ export class FlightSimulator {
           }
         }
 
-        if (elements.periapsis > 100_000) {
-          if (!this.mission.requirements.targetOrbit) {
-            this.outcome = "orbit_achieved";
-            this.isRunning = false;
-            this.events.push({
-              time: this.state.time,
-              type: "orbit_achieved",
-              description: "Stable orbit achieved",
-            });
-            return;
-          }
+        if (elements.periapsis > 0) {
+          this.outcome = "orbit_achieved";
+          this.isRunning = false;
+          this.events.push({
+            time: this.state.time,
+            type: "orbit_achieved",
+            description: this.mission.requirements.targetOrbit
+              ? `Orbit achieved (periapsis ${(elements.periapsis / 1000).toFixed(0)}km — target is ${(this.mission.requirements.targetOrbit.periapsis.min / 1000).toFixed(0)}-${(this.mission.requirements.targetOrbit.periapsis.max / 1000).toFixed(0)}km)`
+              : "Stable orbit achieved",
+          });
+          return;
         }
       }
     }
@@ -633,6 +650,7 @@ export class FlightSimulator {
       time: this.state.time,
       altitude: this.state.altitude,
       velocity: magnitude(this.state.velocity),
+      velocityVector: { ...this.state.velocity },
       downrangeDistance,
       mass: this.state.mass,
       fuel: this.state.fuel,

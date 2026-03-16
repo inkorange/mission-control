@@ -58,5 +58,5 @@ export const SATURN_SOI = 54.5e9; // meters
 
 // Simulation defaults
 export const FIXED_DT = 0.01; // seconds — physics timestep
-export const DEFAULT_DRAG_COEFFICIENT = 0.2; // Typical for rockets
-export const DEFAULT_CROSS_SECTION = 10; // m² — rough approximation
+export const DEFAULT_DRAG_COEFFICIENT = 0.05; // Game-balanced drag (lower than real for playability)
+export const DEFAULT_CROSS_SECTION = 3; // m² — streamlined rocket

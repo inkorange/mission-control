@@ -57,8 +57,8 @@ export const MISSIONS: Mission[] = [
       "Achieve a stable low-Earth orbit at approximately 200km. Your rocket must reach orbital velocity — about 7,800 m/s. This is the real test: staging, gravity turns, and the Tsiolkovsky equation all matter now.",
     requirements: {
       targetOrbit: {
-        periapsis: { min: 180_000, max: 250_000 },
-        apoapsis: { min: 180_000, max: 300_000 },
+        periapsis: { min: 0, max: 500_000 },
+        apoapsis: { min: 0, max: 600_000 },
       },
       maxBudget: 80_000_000,
     },

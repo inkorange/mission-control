@@ -50,12 +50,12 @@ export default function StageEditor({
           </span>
           {stageIndex === 0 && (
             <span className="font-mono text-[0.55rem] tracking-wider uppercase px-1.5 py-0.5 bg-[var(--nasa-green)]/10 text-[var(--nasa-green)] border border-[var(--nasa-green)]/20 rounded-sm">
-              First
+              Booster — fires first
             </span>
           )}
           {stageIndex === stageCount - 1 && stageCount > 1 && (
             <span className="font-mono text-[0.55rem] tracking-wider uppercase px-1.5 py-0.5 bg-[var(--nasa-blue-light)]/10 text-[var(--nasa-blue-light)] border border-[var(--nasa-blue-light)]/20 rounded-sm">
-              Upper
+              Upper — fires last
             </span>
           )}
         </div>

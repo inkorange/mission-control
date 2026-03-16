@@ -312,11 +312,206 @@ function FlightNoseCone({ radius, height, position }: { radius: number; height: 
   );
 }
 
+/** A single jettisoned stage that drifts and tumbles away */
+interface JettisonedStageData {
+  id: number;
+  spawnTime: number;
+  position: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+  scale: number;
+  radius: number;
+  height: number;
+  engineCount: number;
+  // Drift direction in world space (downward + slight sideways)
+  driftDir: THREE.Vector3;
+  // Random tumble axis
+  tumbleAxis: THREE.Vector3;
+  tumbleSpeed: number;
+}
+
+let jettisonCounter = 0;
+
+function JettisonedStage({ data }: { data: JettisonedStageData }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const elapsed = useRef(0);
+  const bellR = Math.min(0.09, data.radius * 0.35);
+
+  useFrame((_, delta) => {
+    if (!groupRef.current) return;
+    elapsed.current += delta;
+    const t = elapsed.current;
+
+    // Drift away: accelerating slightly (gravity pull)
+    const driftDist = t * 0.4 + t * t * 0.15;
+    groupRef.current.position.copy(data.position)
+      .addScaledVector(data.driftDir, driftDist * data.scale);
+
+    // Tumble rotation
+    const tumbleQuat = new THREE.Quaternion().setFromAxisAngle(
+      data.tumbleAxis,
+      t * data.tumbleSpeed
+    );
+    groupRef.current.quaternion.copy(data.quaternion).multiply(tumbleQuat);
+
+    groupRef.current.scale.setScalar(data.scale);
+
+    // Fade out via children opacity
+    const opacity = Math.max(0, 1 - t / 5);
+    groupRef.current.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        const mat = child.material as THREE.MeshPhysicalMaterial | THREE.MeshBasicMaterial;
+        if (!mat.transparent) {
+          mat.transparent = true;
+          mat.depthWrite = false;
+        }
+        mat.opacity = opacity;
+      }
+    });
+  });
+
+  return (
+    <group ref={groupRef}>
+      {/* Stage body */}
+      <mesh>
+        <cylinderGeometry args={[data.radius, data.radius, data.height, 16]} />
+        <meshPhysicalMaterial color="#e8e4de" roughness={0.3} metalness={0.1} />
+      </mesh>
+      {/* Engine bells */}
+      {data.engineCount > 0 && (
+        <group position={[0, -data.height / 2, 0]}>
+          {Array.from({ length: Math.min(data.engineCount, 7) }).map((_, ei) => {
+            const a = data.engineCount === 1
+              ? 0
+              : (ei / Math.min(data.engineCount, 7)) * Math.PI * 2;
+            const off = data.engineCount === 1 ? 0 : data.radius * 0.5;
+            return (
+              <mesh key={ei} position={[Math.sin(a) * off, -bellR * 1.5, Math.cos(a) * off]}>
+                <coneGeometry args={[bellR, bellR * 3.5, 12]} />
+                <meshPhysicalMaterial color="#1a1a1a" roughness={0.15} metalness={0.95} />
+              </mesh>
+            );
+          })}
+        </group>
+      )}
+    </group>
+  );
+}
+
+function JettisonedStages() {
+  const { currentSnapshot } = useFlightStore();
+  const { stages } = useBuilderStore();
+  const prevStage = useRef(-1);
+  const [jettisoned, setJettisoned] = useState<JettisonedStageData[]>([]);
+
+  // Compute stageData locally (same logic as FlightRocketModel)
+  const stageData = useMemo(() => {
+    if (stages.length === 0) return [];
+    const rawData = stages.map((stage, i) => {
+      let engineMass = 0;
+      let engineCount = 0;
+      for (const ec of stage.engines) {
+        const engine = getEngineById(ec.engineId);
+        if (engine) {
+          engineMass += engine.mass * ec.count;
+          engineCount += ec.count;
+        }
+      }
+      const totalMass = stage.fuelMass + stage.structuralMass + engineMass;
+      return { index: i, totalMass, engineCount };
+    });
+    const maxMass = Math.max(...rawData.map((s) => s.totalMass), 1);
+    let y = 0;
+    return rawData.map((s) => {
+      const widthFactor = s.totalMass / maxMass;
+      const height = Math.max(0.3, Math.min(1.2, (s.totalMass / maxMass) * 1.0 + 0.2));
+      const yOffset = y + height / 2;
+      y += height + 0.06;
+      return { ...s, widthFactor, height, yOffset };
+    });
+  }, [stages]);
+
+  useFrame(() => {
+    if (!currentSnapshot) return;
+    const activeStage = currentSnapshot.currentStage;
+
+    // Detect stage change
+    if (prevStage.current >= 0 && activeStage > prevStage.current) {
+      const droppedIndex = prevStage.current;
+      const dropped = stageData[droppedIndex];
+      if (dropped) {
+        const baseRadius = 0.35;
+        const r = baseRadius * (0.4 + dropped.widthFactor * 0.6);
+
+        // Get rocket's current world position and orientation
+        const pos = simToScene(currentSnapshot.position, currentSnapshot.altitude);
+        const altScene = currentSnapshot.altitude * SCALE;
+        const totalH = stageData.reduce((s, d) => s + d.height + 0.06, 0);
+        const scale = Math.max(0.015, altScene * 0.15 + 0.01) / Math.max(totalH, 1);
+
+        // Rocket orientation
+        const outward = pos.clone().normalize();
+        const prograde = new THREE.Vector3(-outward.z, 0, outward.x);
+        const pitchRad = (currentSnapshot.pitchAngle ?? 0) * (Math.PI / 180);
+        const rocketUp = new THREE.Vector3()
+          .addScaledVector(outward, Math.cos(pitchRad))
+          .addScaledVector(prograde, Math.sin(pitchRad))
+          .normalize();
+        const quat = new THREE.Quaternion().setFromUnitVectors(
+          new THREE.Vector3(0, 1, 0),
+          rocketUp
+        );
+
+        // Drift direction: opposite to rocket heading + slight random sideways
+        const driftDir = rocketUp.clone().negate();
+        const side = new THREE.Vector3().crossVectors(rocketUp, outward).normalize();
+        driftDir.addScaledVector(side, (Math.random() - 0.5) * 0.4).normalize();
+
+        // Random tumble
+        const tumbleAxis = new THREE.Vector3(
+          Math.random() - 0.5,
+          Math.random() - 0.5,
+          Math.random() - 0.5
+        ).normalize();
+
+        const newEntry: JettisonedStageData = {
+          id: ++jettisonCounter,
+          spawnTime: currentSnapshot.time,
+          position: pos.clone(),
+          quaternion: quat.clone(),
+          scale,
+          radius: r,
+          height: dropped.height,
+          engineCount: dropped.engineCount,
+          driftDir,
+          tumbleAxis,
+          tumbleSpeed: 1.5 + Math.random() * 2,
+        };
+        setJettisoned((prev) => [...prev, newEntry]);
+
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+          setJettisoned((prev) => prev.filter((j) => j.id !== newEntry.id));
+        }, 5000);
+      }
+    }
+    prevStage.current = activeStage;
+  });
+
+  return (
+    <>
+      {jettisoned.map((j) => (
+        <JettisonedStage key={j.id} data={j} />
+      ))}
+    </>
+  );
+}
+
 /** Full rocket model in flight — reads builder stage data, orients along velocity */
 function FlightRocketModel() {
   const { currentSnapshot } = useFlightStore();
   const { stages } = useBuilderStore();
   const groupRef = useRef<THREE.Group>(null);
+  const currentQuat = useRef(new THREE.Quaternion());
 
   const stageData = useMemo(() => {
     if (stages.length === 0) return [];
@@ -370,10 +565,12 @@ function FlightRocketModel() {
       .addScaledVector(outward, Math.cos(pitchRad))
       .addScaledVector(prograde, Math.sin(pitchRad))
       .normalize();
-    groupRef.current.quaternion.setFromUnitVectors(
+    const targetQuat = new THREE.Quaternion().setFromUnitVectors(
       new THREE.Vector3(0, 1, 0),
       rocketUp
     );
+    currentQuat.current.slerp(targetQuat, 0.06);
+    groupRef.current.quaternion.copy(currentQuat.current);
   });
 
   if (!currentSnapshot || stageData.length === 0) return null;
@@ -582,6 +779,7 @@ function FlightSceneInner({ targetOrbit, mission }: { targetOrbit?: OrbitalTarge
         <CurrentOrbitLine />
         <TrajectoryTrail />
         <FlightRocketModel />
+        <JettisonedStages />
 
         {/* Moon */}
         {moonBody && <MoonBody simTime={0} />}

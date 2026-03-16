@@ -133,7 +133,7 @@ export default function FlightAdvisory({
   const c = colors[advisory.priority];
 
   return (
-    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 animate-slide-down max-w-[90%]">
+    <div className="absolute top-[140px] left-1/2 -translate-x-1/2 z-20 animate-slide-down max-w-[90%]">
       <div
         className={`flex items-center gap-3 px-5 py-3 rounded ${c.bg} ${c.border} border-2 shadow-lg`}
       >

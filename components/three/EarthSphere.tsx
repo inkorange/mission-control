@@ -38,12 +38,15 @@ const EarthDayNightShader = {
       // Smooth terminator — gradual blend over ~15 degrees
       float blend = smoothstep(-0.15, 0.2, NdotL);
 
-      // Day side: diffuse lighting — boost so sunlit areas are vivid
+      // Day side: diffuse lighting with minimal ambient
       float diffuse = max(0.0, NdotL);
-      vec3 dayLit = day * (0.15 + 1.35 * diffuse);
+      vec3 dayLit = day * (0.03 + 1.4 * diffuse);
 
-      // Night side: city lights glow
-      vec3 nightLit = night * 0.7;
+      // Night side: very dark base with bright city lights punching through
+      float cityBrightness = dot(night, vec3(0.299, 0.587, 0.114));
+      // Boost city light contrast — make dim areas darker, bright areas pop
+      float cityMask = smoothstep(0.08, 0.45, cityBrightness);
+      vec3 nightLit = night * cityMask * 1.2;
 
       gl_FragColor = vec4(mix(nightLit, dayLit, blend), 1.0);
     }
