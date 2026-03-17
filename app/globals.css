@@ -218,6 +218,15 @@ body:has(.earth-bg-active)::before {
   animation: pingSlow 2s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
+/* --- NASA TV ticker scroll --- */
+@keyframes tickerScroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.ticker-scroll {
+  animation: tickerScroll 45s linear infinite;
+}
+
 /* --- Slider with filled track --- */
 .slider-filled {
   -webkit-appearance: none;

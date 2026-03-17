@@ -126,6 +126,7 @@ export default function DebriefPage({
           </span>
         </div>
         <h2 className="text-2xl font-bold tracking-tight">{mission.name}</h2>
+        <p className="text-sm text-[var(--muted)] mt-1 max-w-2xl">{mission.description}</p>
       </div>
 
       {/* Outcome banner */}

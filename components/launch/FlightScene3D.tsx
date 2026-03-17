@@ -777,7 +777,7 @@ function FlightSceneInner({ targetOrbit, mission }: { targetOrbit?: OrbitalTarge
         <KarmanRing />
         {targetOrbit && <TargetOrbitRing targetOrbit={targetOrbit} />}
         <CurrentOrbitLine />
-        <TrajectoryTrail />
+        {/* TrajectoryTrail removed — was choppy at high warp */}
         <FlightRocketModel />
         <JettisonedStages />
 

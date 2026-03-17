@@ -2,9 +2,13 @@ import { create } from "zustand";
 import type { FlightSnapshot, FlightResult, OrbitalElements } from "@/types/physics";
 import type { FlightEvent } from "@/engine/simulation/FlightSimulator";
 
+// Persists across resets so the user's preferred warp speed carries over between launches
+let preferredTimeScale = 1;
+
 interface FlightState {
   isActive: boolean;
   isPaused: boolean;
+  isValidating: boolean; // Auto-warp to validate orbital success
   timeScale: number;
   currentSnapshot: FlightSnapshot | null;
   currentOrbit: OrbitalElements | null;
@@ -18,15 +22,17 @@ interface FlightState {
   addEvent: (event: FlightEvent) => void;
   setEvents: (events: FlightEvent[]) => void;
   setTimeScale: (scale: number) => void;
+  startValidating: () => void;
   pause: () => void;
   resume: () => void;
   endFlight: (result: FlightResult) => void;
   reset: () => void;
 }
 
-export const useFlightStore = create<FlightState>((set) => ({
+export const useFlightStore = create<FlightState>((set, get) => ({
   isActive: false,
   isPaused: false,
+  isValidating: false,
   timeScale: 1,
   currentSnapshot: null,
   currentOrbit: null,
@@ -37,7 +43,7 @@ export const useFlightStore = create<FlightState>((set) => ({
     set({
       isActive: true,
       isPaused: false,
-      timeScale: 1,
+      timeScale: preferredTimeScale,
       currentSnapshot: null,
       currentOrbit: null,
       events: [],
@@ -62,7 +68,18 @@ export const useFlightStore = create<FlightState>((set) => ({
   },
 
   setTimeScale: (scale: number) => {
-    set({ timeScale: Math.max(1, Math.min(10000, scale)) });
+    const clamped = Math.max(1, Math.min(10000, scale));
+    preferredTimeScale = clamped;
+    set({ timeScale: clamped });
+  },
+
+  startValidating: () => {
+    // Save current timeScale so we can restore it after validation
+    const current = get().timeScale;
+    if (current < 1000) {
+      preferredTimeScale = current; // Remember what the user had set
+    }
+    set({ isValidating: true, timeScale: 1000 });
   },
 
   pause: () => set({ isPaused: true }),
@@ -76,7 +93,8 @@ export const useFlightStore = create<FlightState>((set) => ({
     set({
       isActive: false,
       isPaused: false,
-      timeScale: 1,
+      isValidating: false,
+      timeScale: preferredTimeScale,
       currentSnapshot: null,
       currentOrbit: null,
       events: [],

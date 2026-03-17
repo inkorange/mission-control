@@ -58,7 +58,9 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
   const loop = useCallback(
     (timestamp: number) => {
       const sim = simRef.current;
-      if (!sim || !sim.running) return;
+      if (!sim) return;
+      // Don't bail if sim stopped but we have a success result — it will be resumed
+      if (!sim.running && !useFlightStore.getState().result) return;
 
       if (lastTimeRef.current === 0) {
         lastTimeRef.current = timestamp;
@@ -67,7 +69,7 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
       const dtReal = Math.min((timestamp - lastTimeRef.current) / 1000, 0.1); // Cap at 100ms
       lastTimeRef.current = timestamp;
 
-      if (!useFlightStore.getState().isPaused) {
+      if (!useFlightStore.getState().isPaused && sim.running) {
         sim.tick(dtReal);
 
         // Push state to store
@@ -80,12 +82,38 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
         updateOrbit(sim.getCurrentOrbit());
         setEvents(sim.flightEvents);
 
+        // Check if orbit validation should start (auto-warp to coast to apoapsis)
+        if (sim.isValidating && !useFlightStore.getState().isValidating) {
+          useFlightStore.getState().startValidating();
+          sim.setTimeScale(1000); // Sync simulator with store
+        }
+
         // Check if sim ended
         if (!sim.running) {
           const result = sim.getResult();
-          endFlight(result);
-          saveToProgression(result);
-          return;
+          const isSuccess = result.outcome === "mission_complete" ||
+            result.outcome === "orbit_achieved" ||
+            result.outcome === "target_reached" ||
+            result.outcome === "escaped";
+
+          if (isSuccess) {
+            if (!useFlightStore.getState().result) {
+              // First time detecting success — save result, restore pre-validation warp speed
+              const restoreScale = useFlightStore.getState().isValidating
+                ? Math.max(1, Math.min(100, useFlightStore.getState().timeScale))
+                : useFlightStore.getState().timeScale;
+              useFlightStore.setState({ result, isValidating: false, timeScale: restoreScale });
+              sim.setTimeScale(restoreScale);
+              saveToProgression(result);
+            }
+            // Resume sim so player can watch the orbit
+            sim.resume();
+          } else {
+            // Failure — stop everything
+            endFlight(result);
+            saveToProgression(result);
+            return;
+          }
         }
       }
 
@@ -101,6 +129,8 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
     reset();
     startFlight();
     sim.start();
+    // Sync simulator timeScale with the store's preferred speed
+    sim.setTimeScale(useFlightStore.getState().timeScale);
     lastTimeRef.current = 0;
     rafRef.current = requestAnimationFrame(loop);
   }, [getSimulator, reset, startFlight, loop]);

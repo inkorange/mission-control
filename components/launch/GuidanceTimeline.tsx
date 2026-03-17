@@ -80,14 +80,13 @@ export default function GuidanceTimeline({
     if (snapshot.time - lastSampleTime.current < 0.5) return;
     lastSampleTime.current = snapshot.time;
 
-    const guide = getGuidanceAt(snapshot.altitude);
     historyRef.current.push({
       time: snapshot.time,
       alt: snapshot.altitude,
       pitch: snapshot.pitchAngle,
       throttle: commandedThrottle / 100, // Normalize 0-100 → 0-1
       guidePitch: targetPitch,
-      guideThrottle: guide.throttle,
+      guideThrottle: 1.0, // Autopilot runs full throttle
     });
 
     // Keep last 5 minutes
@@ -106,7 +105,7 @@ export default function GuidanceTimeline({
 
   const currentTime = snapshot?.time ?? 0;
   const currentAlt = snapshot?.altitude ?? 0;
-  const currentGuide = getGuidanceAt(currentAlt);
+  const currentGuide = { pitch: targetPitch, throttle: 1.0 };
 
   // Find which checkpoints are visible in the timeline window
   const visibleCheckpoints = useMemo(() => {
@@ -169,22 +168,21 @@ export default function GuidanceTimeline({
   const actualThrPath = buildPath(history, (p) => p.throttle, 1, thrYTop, thrYH);
   const guideThrPath = buildPath(history, (p) => p.guideThrottle, 1, thrYTop, thrYH);
 
-  // Extend guide line into the future
+  // Extend guide line into the future — extrapolate from current target pitch
+  // Use recent pitch rate to project where target will be
   const futureGuidePoints: { time: number; pitch: number; throttle: number }[] = [];
+  const recentHist = history.slice(-20);
+  let pitchRate = 0;
+  if (recentHist.length >= 2) {
+    const first = recentHist[0];
+    const last = recentHist[recentHist.length - 1];
+    const dt2 = last.time - first.time;
+    if (dt2 > 0) pitchRate = (last.guidePitch - first.guidePitch) / dt2;
+  }
   for (let dt = 0; dt <= VISIBLE_SECONDS * 0.7; dt += 1) {
     const futureTime = currentTime + dt;
-    // Estimate future altitude based on current climb rate
-    const recentHist = history.slice(-10);
-    let climbRate = 0;
-    if (recentHist.length >= 2) {
-      const first = recentHist[0];
-      const last = recentHist[recentHist.length - 1];
-      const dt2 = last.time - first.time;
-      if (dt2 > 0) climbRate = (last.alt - first.alt) / dt2;
-    }
-    const estAlt = currentAlt + climbRate * dt;
-    const g = getGuidanceAt(estAlt);
-    futureGuidePoints.push({ time: futureTime, ...g });
+    const futurePitch = Math.min(90, Math.max(0, targetPitch + pitchRate * dt));
+    futureGuidePoints.push({ time: futureTime, pitch: futurePitch, throttle: 1.0 });
   }
 
   const futureGuidePitchPath = futureGuidePoints

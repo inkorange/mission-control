@@ -12,6 +12,7 @@ import RocketPreview3D from "@/components/builder/RocketPreview3D";
 import { formatCost } from "@/lib/formatters";
 import type { EngineDef, FuelTankDef, FuelType } from "@/types/rocket";
 import { ENGINE_FUEL_MAP } from "@/types/rocket";
+import { buildPresetRocket } from "@/engine/data/rocketPresets";
 
 export default function BuilderPage({
   params,
@@ -129,12 +130,9 @@ export default function BuilderPage({
             <div className="h-4 w-px bg-[var(--border)]" />
             <h2 className="text-base font-semibold">{mission.name}</h2>
             <div className="h-4 w-px bg-[var(--border)]" />
-            <div className="flex items-center gap-1.5">
-              <span className="status-dot status-dot--active" />
-              <span className="font-mono text-[0.75rem] tracking-wider uppercase text-[var(--nasa-green)]">
-                Assembly
-              </span>
-            </div>
+            <span className="text-[0.8rem] text-[var(--muted)] max-w-xl truncate" title={mission.description}>
+              {mission.description}
+            </span>
           </div>
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-4">
@@ -188,12 +186,20 @@ export default function BuilderPage({
             <span className="font-mono text-[0.75rem] tracking-[0.2em] uppercase text-[var(--nasa-red)]">
               Stage Assembly
             </span>
-            <button
-              onClick={addStage}
-              className="font-mono text-[0.75rem] tracking-[0.1em] uppercase px-3 py-1.5 border border-[var(--border)] hover:border-[var(--nasa-red)]/40 hover:bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)] rounded-sm transition-colors"
-            >
-              + Add Stage
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={addStage}
+                className="font-mono text-[0.75rem] tracking-[0.1em] uppercase px-3 py-1.5 border border-[var(--border)] hover:border-[var(--nasa-red)]/40 hover:bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--foreground)] rounded-sm transition-colors"
+              >
+                + Add Stage
+              </button>
+              <button
+                onClick={() => mission && buildPresetRocket(mission)}
+                className="font-mono text-[0.75rem] tracking-[0.1em] uppercase px-3 py-1.5 border border-[var(--nasa-blue-light)]/30 hover:border-[var(--nasa-blue-light)] hover:bg-[var(--nasa-blue)]/10 text-[var(--nasa-blue-light)] rounded-sm transition-colors"
+              >
+                Build It For Me
+              </button>
+            </div>
           </div>
 
           {stages.length === 0 ? (

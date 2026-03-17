@@ -13,6 +13,7 @@ import FlightScene3D from "@/components/launch/FlightScene3D";
 import PitchArcControl from "@/components/launch/PitchArcControl";
 import FlightAdvisory from "@/components/launch/FlightAdvisory";
 import GuidanceTimeline from "@/components/launch/GuidanceTimeline";
+import MissionTicker from "@/components/launch/MissionTicker";
 import EventLog from "@/components/launch/EventLog";
 import {
   formatDistance,
@@ -21,11 +22,6 @@ import {
 } from "@/lib/formatters";
 
 const COUNTDOWN_CALLOUTS: Record<number, string> = {
-  10: "Go for launch",
-  9: "Internal power",
-  8: "Guidance is internal",
-  7: "Engine chill",
-  6: "Hydraulics nominal",
   5: "Startup",
   4: "Main engine start",
   3: "Main engine start",
@@ -49,7 +45,7 @@ export default function LaunchPage({
   const mission = getMissionById(missionId);
   const getRocketConfig = useBuilderStore((s) => s.getRocketConfig);
   const rocketConfig = getRocketConfig();
-  const { isPaused, currentSnapshot, result, timeScale, reset: resetFlight } =
+  const { isPaused, isValidating, currentSnapshot, result, timeScale, reset: resetFlight } =
     useFlightStore();
 
   // Reset flight state when entering the launch page so previous results don't persist
@@ -75,7 +71,7 @@ export default function LaunchPage({
 
   const beginCountdown = useCallback(() => {
     setLaunchPhase("countdown");
-    setCountdown(10);
+    setCountdown(5);
     countdownStartRef.current = performance.now();
   }, []);
 
@@ -85,7 +81,7 @@ export default function LaunchPage({
 
     const tick = (now: number) => {
       const elapsed = (now - countdownStartRef.current) / 1000;
-      const remaining = Math.max(0, 10 - elapsed);
+      const remaining = Math.max(0, 5 - elapsed);
 
       setCountdown(remaining);
 
@@ -123,6 +119,20 @@ export default function LaunchPage({
 
   const stageCount = rocketConfig.stages.length;
 
+  // Helper: interpolate a pitch profile at a given altitude
+  const interpolateProfile = useCallback((profile: [number, number][], alt: number): number => {
+    if (alt >= profile[profile.length - 1][0]) return 90;
+    for (let i = 1; i < profile.length; i++) {
+      if (alt <= profile[i][0]) {
+        const [a0, p0] = profile[i - 1];
+        const [a1, p1] = profile[i];
+        const t = (alt - a0) / (a1 - a0);
+        return p0 + t * (p1 - p0);
+      }
+    }
+    return 0;
+  }, []);
+
   // Autopilot: pitch, throttle, and staging
   const lastAutoStageRef = useRef(-1);
   const pitchRef = useRef(0);
@@ -135,37 +145,63 @@ export default function LaunchPage({
     const fuel = currentSnapshot.fuel;
     const stage = currentSnapshot.currentStage;
 
-    // === PITCH: altitude-based gravity turn ===
-    const pitchProfile: [number, number][] = [
-      [0, 0],
-      [3_000, 0],
-      [5_000, 5],
-      [10_000, 15],
-      [20_000, 28],
-      [40_000, 42],
-      [60_000, 52],
-      [80_000, 62],
-      [100_000, 72],
-      [120_000, 82],
-      [140_000, 87],
-      [160_000, 89],
-      [180_000, 90],
-    ];
+    // === DETERMINE MISSION TYPE ===
+    const targetOrbit = mission?.requirements.targetOrbit;
+    const targetBody = mission?.requirements.targetBody;
+    const orb = currentSnapshot.orbitalElements;
+    const r = 6_371_000 + alt;
+    const vCirc = Math.sqrt(3.986e14 / r);
 
+    // Classify mission type
+    const isSuborbital = targetOrbit &&
+      (!isFinite(targetOrbit.periapsis.min) || !isFinite(targetOrbit.periapsis.max));
+
+    const targetPeriMin = targetOrbit ? (isFinite(targetOrbit.periapsis.min) ? targetOrbit.periapsis.min : 0) : 0;
+    const targetApoMin = targetOrbit ? (isFinite(targetOrbit.apoapsis.min) ? targetOrbit.apoapsis.min : 0) : 0;
+    const avgTargetAlt = (targetPeriMin + targetApoMin) / 2;
+
+    // Mission categories:
+    // suborbital: just go up (First Light)
+    // low_orbit: target < 500km (Orbit!, Payload Delivery)
+    // high_orbit: target 500-2000km (Higher Ground)
+    // transfer: target > 2000km or has target body (GTO, GEO, lunar, Mars, Jupiter, Saturn, escape)
+    const missionCategory = isSuborbital ? "suborbital"
+      : targetBody ? "transfer"
+      : avgTargetAlt > 300_000 ? "transfer"
+      : "low_orbit";
+
+    // === PITCH ===
     let targetPitch = 0;
 
-    if (alt >= pitchProfile[pitchProfile.length - 1][0]) {
-      targetPitch = 90;
-    } else {
-      for (let i = 1; i < pitchProfile.length; i++) {
-        if (alt <= pitchProfile[i][0]) {
-          const [a0, p0] = pitchProfile[i - 1];
-          const [a1, p1] = pitchProfile[i];
-          const t = (alt - a0) / (a1 - a0);
-          targetPitch = p0 + t * (p1 - p0);
-          break;
-        }
+    if (missionCategory === "suborbital") {
+      // Go straight up, slight pitch at high altitude
+      targetPitch = alt < 50_000 ? 0 : Math.min(10, (alt - 50_000) / 10_000);
+
+    } else if (missionCategory === "transfer") {
+      // Reach LEO first (~200km), then burn prograde to build transfer velocity
+      // Phase 1: standard LEO gravity turn
+      // Phase 2: once near orbital velocity, go fully horizontal for transfer burn
+      const nearOrbital = alt > 100_000 && vel > vCirc * 0.85;
+
+      if (nearOrbital) {
+        targetPitch = 90; // Prograde burn for transfer
+      } else {
+        const leoProfile: [number, number][] = [
+          [0, 0], [5_000, 0], [8_000, 5], [15_000, 12], [30_000, 25],
+          [50_000, 38], [70_000, 50], [90_000, 60], [100_000, 68],
+          [120_000, 78], [140_000, 85], [160_000, 88], [180_000, 90],
+        ];
+        targetPitch = interpolateProfile(leoProfile, alt);
       }
+
+    } else {
+      // Low orbit: standard gravity turn
+      const lowProfile: [number, number][] = [
+        [0, 0], [5_000, 0], [8_000, 5], [15_000, 12], [30_000, 25],
+        [50_000, 38], [70_000, 50], [90_000, 60], [100_000, 68],
+        [120_000, 78], [140_000, 85], [160_000, 88], [180_000, 90],
+      ];
+      targetPitch = interpolateProfile(lowProfile, alt);
     }
 
     // Store the raw target for the guidance graph
@@ -179,13 +215,28 @@ export default function LaunchPage({
       setPitch(roundedTarget);
     }
 
-    // === THROTTLE: continuous burn until orbit achieved ===
-    const orb = currentSnapshot.orbitalElements;
-    let targetThrottle = 1.0;
+    // === THROTTLE ===
+    let targetThrottle = 1.0; // Full throttle by default
 
-    if (orb && alt > 100_000) {
-      if (orb.periapsis > 170_000 && orb.apoapsis > 170_000) {
-        targetThrottle = 0; // Orbit achieved — cut engines
+    if (missionCategory === "suborbital") {
+      // Cut throttle once past target altitude
+      const targetApo = targetOrbit ? (isFinite(targetOrbit.apoapsis.min) ? targetOrbit.apoapsis.min : 100_000) : 100_000;
+      if (alt > targetApo * 1.1) {
+        targetThrottle = 0;
+      }
+    } else if (orb && alt > 100_000) {
+      // For orbital/transfer missions: burn until mission goals are met
+      // The sim's checkTermination will detect success and stop the sim
+      // Only cut throttle if we somehow overshoot into a clearly stable orbit
+      // Cut throttle when approaching target orbit — use apoapsis max as the limit
+      if (targetOrbit) {
+        const apoMax = isFinite(targetOrbit.apoapsis.max) ? targetOrbit.apoapsis.max : Infinity;
+        // Cut at 70% of apoapsis max to avoid overshooting at high warp
+        if (orb.apoapsis > apoMax * 0.7 && orb.periapsis > -100_000) {
+          targetThrottle = 0;
+        }
+      } else if (orb.periapsis > 100_000) {
+        targetThrottle = 0;
       }
     }
 
@@ -273,8 +324,8 @@ export default function LaunchPage({
     <div className="h-[calc(100vh-84px)] flex flex-col">
       {/* Flight HUD header */}
       <div className="border-b border-[var(--border)] bg-[var(--surface)]">
-        <div className="px-6 py-5 flex items-center justify-between">
-          <div className="flex items-center gap-4">
+        <div className="px-6 py-5 flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-shrink-0">
             <span className="font-mono text-[0.7rem] tracking-[0.2em] uppercase text-[var(--nasa-blue-light)]">
               {mission.codename}
             </span>
@@ -292,8 +343,19 @@ export default function LaunchPage({
             </div>
           </div>
 
+          {/* Inline ticker — fills available space between left and right */}
+          {(
+            <div className="flex-1 min-w-0 mx-2">
+              <MissionTicker
+                missionName={mission.name}
+                missionCodename={mission.codename}
+                missionDescription={mission.description}
+              />
+            </div>
+          )}
+
           {/* Telemetry strip */}
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-6 flex-shrink-0">
             <div className="flex items-center gap-4">
               <div>
                 <span className="font-mono text-[0.625rem] tracking-[0.15em] uppercase text-[var(--muted)] block">
@@ -466,80 +528,104 @@ export default function LaunchPage({
             </div>
           )}
 
-          {/* Post-flight result modal */}
-          {result && (
+          {/* Orbit validation overlay */}
+          {isValidating && !result && (
+            <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 animate-fade-in">
+              <div className="panel-glass px-8 py-4 flex items-center gap-4">
+                <div className="w-5 h-5 border-2 border-[var(--nasa-green)] border-t-transparent rounded-full animate-spin" />
+                <div>
+                  <span className="font-mono text-[0.85rem] tracking-[0.1em] uppercase text-[var(--nasa-green)] block">
+                    Validating Orbital Success
+                  </span>
+                  <span className="font-mono text-[0.65rem] text-[var(--muted)]">
+                    Coasting to apoapsis at {timeScale}x warp — altitude: {((currentSnapshot?.altitude ?? 0) / 1000).toFixed(0)}km
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Post-flight result */}
+          {result && !isSuccessOutcome && (
+            /* Failure: full-screen modal */
             <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/50 animate-fade-in">
               <div className="panel p-6 max-w-lg w-full mx-4 animate-scale-in">
-                {/* Outcome header */}
                 <div className="text-center mb-5">
-                  <span
-                    className={`font-mono text-[1rem] tracking-[0.2em] uppercase font-bold block ${
-                      isSuccessOutcome
-                        ? "text-[var(--nasa-green)]"
-                        : "text-[var(--nasa-red)]"
-                    }`}
-                  >
-                    {result.outcome === "mission_complete"
-                      ? "Mission Complete"
-                      : result.outcome === "orbit_achieved"
-                        ? "Orbit Achieved"
-                        : result.outcome === "target_reached"
-                          ? "Target Reached"
-                          : result.outcome === "escaped"
-                            ? "Escape Achieved"
-                            : result.outcome === "crash"
-                              ? "Vehicle Lost"
-                              : result.outcome === "aborted"
-                                ? "Mission Aborted"
-                                : result.outcome === "suborbital"
-                                  ? "Suborbital Only"
-                                  : "Fuel Exhausted"}
+                  <span className="font-mono text-[1rem] tracking-[0.2em] uppercase font-bold block text-[var(--nasa-red)]">
+                    {result.outcome === "crash"
+                      ? "Vehicle Lost"
+                      : result.outcome === "aborted"
+                        ? "Mission Aborted"
+                        : result.outcome === "suborbital"
+                          ? "Suborbital Only"
+                          : "Fuel Exhausted"}
                   </span>
                   <div className="nasa-stripe mt-3" />
                 </div>
-
-                {/* Stats grid */}
                 <div className="grid grid-cols-3 gap-3 mb-5">
                   <div className="p-3 rounded-sm border border-[var(--border)] bg-black/20 text-center">
-                    <span className="font-mono text-[0.6rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1">
-                      Max Altitude
-                    </span>
-                    <span className="font-mono text-base text-[var(--data)]">
-                      {formatDistance(result.maxAltitude)}
-                    </span>
+                    <span className="font-mono text-[0.6rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1">Max Altitude</span>
+                    <span className="font-mono text-base text-[var(--data)]">{formatDistance(result.maxAltitude)}</span>
                   </div>
                   <div className="p-3 rounded-sm border border-[var(--border)] bg-black/20 text-center">
-                    <span className="font-mono text-[0.6rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1">
-                      Duration
-                    </span>
-                    <span className="font-mono text-base text-[var(--data)]">
-                      {formatMissionTime(result.flightDuration)}
-                    </span>
+                    <span className="font-mono text-[0.6rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1">Duration</span>
+                    <span className="font-mono text-base text-[var(--data)]">{formatMissionTime(result.flightDuration)}</span>
                   </div>
                   <div className="p-3 rounded-sm border border-[var(--border)] bg-black/20 text-center">
-                    <span className="font-mono text-[0.6rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1">
-                      Delta-V Used
-                    </span>
-                    <span className="font-mono text-base text-[var(--data)]">
-                      {result.totalDeltaVUsed.toFixed(0)} m/s
-                    </span>
+                    <span className="font-mono text-[0.6rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1">Delta-V Used</span>
+                    <span className="font-mono text-base text-[var(--data)]">{result.totalDeltaVUsed.toFixed(0)} m/s</span>
                   </div>
                 </div>
-
-                {/* Action buttons */}
                 <div className="flex items-center gap-3">
-                  <Link
-                    href={`/debrief/${missionId}`}
-                    className="flex-1 text-center font-mono text-[0.8rem] tracking-[0.1em] uppercase py-2.5 bg-[var(--nasa-red)] hover:bg-[var(--nasa-red-dark)] text-white rounded-sm transition-colors"
-                  >
+                  <Link href={`/debrief/${missionId}`} className="flex-1 text-center font-mono text-[0.8rem] tracking-[0.1em] uppercase py-2.5 bg-[var(--nasa-red)] hover:bg-[var(--nasa-red-dark)] text-white rounded-sm transition-colors">
                     Debrief
                   </Link>
-                  <Link
-                    href={`/builder/${missionId}`}
-                    className="flex-1 text-center font-mono text-[0.8rem] tracking-[0.1em] uppercase py-2.5 border border-[var(--nasa-gold)]/40 text-[var(--nasa-gold)] hover:bg-[var(--nasa-gold)]/10 hover:border-[var(--nasa-gold)] rounded-sm transition-colors"
-                  >
+                  <Link href={`/builder/${missionId}`} className="flex-1 text-center font-mono text-[0.8rem] tracking-[0.1em] uppercase py-2.5 border border-[var(--nasa-gold)]/40 text-[var(--nasa-gold)] hover:bg-[var(--nasa-gold)]/10 hover:border-[var(--nasa-gold)] rounded-sm transition-colors">
                     Retry
                   </Link>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Success: bottom banner with green glow — sim keeps running behind it */}
+          {result && isSuccessOutcome && (
+            <div className="absolute bottom-0 left-0 right-0 z-10 animate-slide-up mb-8">
+              <div className="mx-6 rounded-lg overflow-hidden" style={{ border: '2px solid var(--nasa-green)', boxShadow: '0 0 24px rgba(0, 230, 118, 0.25), inset 0 0 24px rgba(0, 230, 118, 0.05)', background: 'rgba(6, 13, 31, 0.85)', backdropFilter: 'blur(20px)' }}>
+                <div className="px-5 py-4">
+                  <div className="flex items-center justify-between gap-6">
+                    <div className="flex items-center gap-5">
+                      <div className="flex items-center gap-3">
+                        <span className="status-dot status-dot--active" />
+                        <span className="font-mono text-[1.1rem] tracking-[0.2em] uppercase font-bold text-[var(--nasa-green)]">
+                          {result.outcome === "mission_complete" ? "Mission Complete" : result.outcome === "orbit_achieved" ? "Orbit Achieved" : result.outcome === "target_reached" ? "Target Reached" : "Escape Achieved"}
+                        </span>
+                      </div>
+                      <div className="h-6 w-px bg-[var(--nasa-green)]/30" />
+                      <div className="flex items-center gap-5">
+                        <div>
+                          <span className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-[var(--nasa-green)]/60 block">Max Alt</span>
+                          <span className="font-mono text-[0.8rem] text-[var(--nasa-green)]">{formatDistance(result.maxAltitude)}</span>
+                        </div>
+                        <div>
+                          <span className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-[var(--nasa-green)]/60 block">Delta-V</span>
+                          <span className="font-mono text-[0.8rem] text-[var(--nasa-green)]">{result.totalDeltaVUsed.toFixed(0)} m/s</span>
+                        </div>
+                        <div>
+                          <span className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-[var(--nasa-green)]/60 block">MET</span>
+                          <span className="font-mono text-[0.8rem] text-[var(--nasa-green)]">{formatMissionTime(result.flightDuration)}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Link href={`/debrief/${missionId}`} className="font-mono text-[0.8rem] tracking-[0.1em] uppercase px-6 py-2.5 bg-[var(--nasa-green)] hover:bg-[var(--nasa-green)]/80 text-black font-bold rounded-sm transition-colors">
+                        Debrief
+                      </Link>
+                      <Link href={`/builder/${missionId}`} className="font-mono text-[0.8rem] tracking-[0.1em] uppercase px-6 py-2.5 border border-[var(--nasa-green)]/30 text-[var(--nasa-green)] hover:bg-[var(--nasa-green)]/10 rounded-sm transition-colors">
+                        Retry
+                      </Link>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

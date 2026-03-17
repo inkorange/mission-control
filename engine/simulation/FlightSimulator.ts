@@ -53,6 +53,9 @@ export class FlightSimulator {
   private lastVelocity: number;
   private engineLookup: Map<string, EngineDef>;
   private suborbitalTargetReached: boolean;
+  private validationTriggered: boolean;
+  private validationApoapsis: number;
+  private outcomeReached: boolean; // Prevents re-triggering success after resume
   private launchAngle: number;
 
   // Multi-body
@@ -136,6 +139,9 @@ export class FlightSimulator {
     this.totalDeltaVUsed = 0;
     this.lastVelocity = magnitude(this.state.velocity);
     this.suborbitalTargetReached = false;
+    this.validationTriggered = false;
+    this.validationApoapsis = 0;
+    this.outcomeReached = false;
     this.launchAngle = Math.atan2(this.state.position.y, this.state.position.x);
 
     // Multi-body setup
@@ -160,6 +166,12 @@ export class FlightSimulator {
     this.recordSnapshot();
   }
 
+  /** Resume the simulation after success (so player can watch the orbit) */
+  resume(): void {
+    this.isRunning = true;
+    this.outcomeReached = true; // Skip further termination checks
+  }
+
   /** Check if sim is still running */
   get running(): boolean {
     return this.isRunning;
@@ -168,6 +180,11 @@ export class FlightSimulator {
   /** Get current outcome (null if still running) */
   get currentOutcome(): FlightOutcome | null {
     return this.outcome;
+  }
+
+  /** Whether orbit validation is in progress (coasting to apoapsis) */
+  get isValidating(): boolean {
+    return this.validationTriggered;
   }
 
   /** Get the current sim state */
@@ -254,7 +271,9 @@ export class FlightSimulator {
    * Runs multiple fixed-timestep physics steps per frame based on timeScale.
    */
   tick(dtReal: number): void {
-    if (!this.isRunning || this.outcome) return;
+    if (!this.isRunning) return;
+    // After success, keep ticking for visualization but skip termination checks
+    // (outcomeReached is set by resume())
 
     const dtSim = dtReal * this.timeScale;
     // Use larger timestep at high warp to avoid excessive substeps
@@ -264,7 +283,7 @@ export class FlightSimulator {
 
     for (let i = 0; i < steps; i++) {
       this.physicsStep(actualDt);
-      if (this.outcome) break;
+      if (this.outcome && !this.outcomeReached) break;
     }
 
     this.recordSnapshot();
@@ -294,6 +313,30 @@ export class FlightSimulator {
     const effectiveIsp =
       stage.avgIspSeaLevel +
       (stage.avgIspVacuum - stage.avgIspSeaLevel) * altFraction;
+
+    // Auto-cutoff: if orbit matches target, kill thrust to prevent overshooting
+    // This runs every physics step so it catches the target even at high warp
+    if (this.state.altitude > 100_000 && this.mission.requirements.targetOrbit && !this.outcomeReached) {
+      const target = this.mission.requirements.targetOrbit;
+      const apoMax = isFinite(target.apoapsis.max) ? target.apoapsis.max : Infinity;
+      if (isFinite(apoMax)) {
+        const checkElements = orbitalElementsFromState(this.state.position, this.state.velocity);
+        if (checkElements.apoapsis > apoMax * 0.7 && checkElements.periapsis > -100_000) {
+          this.throttle = 0;
+
+          // If we haven't reached the target altitude yet, trigger validation (auto-warp coast)
+          const targetAltMin = isFinite(target.apoapsis.min) ? target.apoapsis.min : 0;
+          if (targetAltMin > 0 && this.state.altitude < targetAltMin && !this.validationTriggered) {
+            this.validationTriggered = true;
+            this.events.push({
+              time: this.state.time,
+              type: "orbit_achieved",
+              description: `Orbit confirmed — coasting to ${(checkElements.apoapsis / 1000).toFixed(0)}km for validation...`,
+            });
+          }
+        }
+      }
+    }
 
     // Compute thrust vector direction
     let thrustVec: Vector2D = { x: 0, y: 0 };
@@ -399,6 +442,9 @@ export class FlightSimulator {
   }
 
   private checkTermination(): void {
+    // Skip termination checks if outcome already reached and sim was resumed
+    if (this.outcomeReached) return;
+
     // Crash check (Earth surface)
     if (this.state.altitude < 0) {
       this.outcome = "crash";
@@ -514,63 +560,55 @@ export class FlightSimulator {
       }
     }
 
+    // Simple altitude check: if rocket reaches the target altitude with orbital-ish velocity, it's a success
+    // This is the primary success check — no complex orbital element matching needed
+    if (!this.mission.requirements.targetBody && this.mission.requirements.targetOrbit) {
+      const target = this.mission.requirements.targetOrbit;
+      const targetAltMin = isFinite(target.apoapsis.min) ? target.apoapsis.min : 0;
+
+      if (targetAltMin > 0 && this.state.altitude >= targetAltMin) {
+        const r = magnitude(this.state.position);
+        const v = magnitude(this.state.velocity);
+        const vCirc = Math.sqrt(EARTH_MU / r);
+
+        // Must have at least 70% of circular velocity (not just floating up on a ballistic arc)
+        if (v >= vCirc * 0.7) {
+          this.outcome = "mission_complete";
+          this.isRunning = false;
+          this.events.push({
+            time: this.state.time,
+            type: "orbit_achieved",
+            description: `Target altitude reached at ${(this.state.altitude / 1000).toFixed(0)}km!`,
+          });
+          return;
+        }
+      }
+    }
+
     // Earth orbit checks (for missions without targetBody)
     if (!this.mission.requirements.targetBody && this.state.altitude > 100_000) {
       const r = magnitude(this.state.position);
       const v = magnitude(this.state.velocity);
       const vCircular = Math.sqrt(EARTH_MU / r);
 
-      // Velocity-based orbit check: if going fast enough for orbit at this altitude
-      // This is more forgiving than periapsis checks — catches orbits with slight vertical velocity
-      if (v >= vCircular * 0.99) {
-        this.outcome = this.mission.requirements.targetOrbit ? "mission_complete" : "orbit_achieved";
-        this.isRunning = false;
-        this.events.push({
-          time: this.state.time,
-          type: "orbit_achieved",
-          description: `Orbit achieved at ${(this.state.altitude / 1000).toFixed(0)}km! Velocity: ${v.toFixed(0)} m/s (orbital: ${vCircular.toFixed(0)} m/s)`,
-        });
-        return;
-      }
+      if (!this.mission.requirements.targetOrbit) {
+        // No target orbit — any stable orbit counts
+        const rDir = normalize(this.state.position);
+        const radialV = dot(rDir, this.state.velocity);
+        const tangentialV = Math.sqrt(Math.max(0, v * v - radialV * radialV));
 
-      const elements = orbitalElementsFromState(
-        this.state.position,
-        this.state.velocity
-      );
-
-      if (isOrbitStable(elements)) {
-        if (this.mission.requirements.targetOrbit) {
-          const target = this.mission.requirements.targetOrbit;
-          if (
-            elements.periapsis >= target.periapsis.min &&
-            elements.periapsis <= target.periapsis.max &&
-            elements.apoapsis >= target.apoapsis.min &&
-            elements.apoapsis <= target.apoapsis.max
-          ) {
-            this.outcome = "mission_complete";
-            this.isRunning = false;
-            this.events.push({
-              time: this.state.time,
-              type: "orbit_achieved",
-              description: "Target orbit achieved!",
-            });
-            return;
-          }
-        }
-
-        if (elements.periapsis > 0) {
+        if (tangentialV >= vCircular * 0.99 && Math.abs(radialV) < vCircular * 0.15) {
           this.outcome = "orbit_achieved";
           this.isRunning = false;
           this.events.push({
             time: this.state.time,
             type: "orbit_achieved",
-            description: this.mission.requirements.targetOrbit
-              ? `Orbit achieved (periapsis ${(elements.periapsis / 1000).toFixed(0)}km — target is ${(this.mission.requirements.targetOrbit.periapsis.min / 1000).toFixed(0)}-${(this.mission.requirements.targetOrbit.periapsis.max / 1000).toFixed(0)}km)`
-              : "Stable orbit achieved",
+            description: `Orbit achieved at ${(this.state.altitude / 1000).toFixed(0)}km!`,
           });
           return;
         }
       }
+      // Missions WITH target orbits use the simple altitude check above — no additional checks here
     }
 
     // Solar escape detection (for Tier 5 escape mission)
@@ -601,6 +639,22 @@ export class FlightSimulator {
         this.state.position,
         this.state.velocity
       );
+
+      // If orbit will reach the target altitude, trigger validation instead of failure
+      if (this.mission.requirements.targetOrbit && !this.validationTriggered) {
+        const target = this.mission.requirements.targetOrbit;
+        const targetAltMin = isFinite(target.apoapsis.min) ? target.apoapsis.min : 0;
+        if (elements.apoapsis >= targetAltMin * 0.9 && elements.periapsis > -50_000) {
+          this.validationTriggered = true;
+          this.events.push({
+            time: this.state.time,
+            type: "orbit_achieved",
+            description: `Fuel exhausted — coasting to ${(elements.apoapsis / 1000).toFixed(0)}km apoapsis for validation...`,
+          });
+          return; // Don't declare suborbital — let it coast
+        }
+      }
+
       if (elements.periapsis < 0) {
         this.outcome = "suborbital";
         this.isRunning = false;

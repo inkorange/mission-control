@@ -29,6 +29,7 @@ export default function MissionSelect() {
     isLoaded,
     loadProgress,
     missionResults,
+    unlockedTiers,
     isTierUnlocked,
     getTierStars,
     totalStars,
@@ -38,6 +39,19 @@ export default function MissionSelect() {
   useEffect(() => {
     loadProgress();
   }, [loadProgress]);
+
+  // Shift+O: unlock all tiers for testing
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.shiftKey && e.key === "O") {
+        useProgressionStore.setState({
+          unlockedTiers: [1, 2, 3, 4, 5],
+        });
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   if (!isLoaded) {
     return (
@@ -84,7 +98,7 @@ export default function MissionSelect() {
 
       {/* Tier sections */}
       {tiers.map((tier) => {
-        const unlocked = isTierUnlocked(tier);
+        const unlocked = unlockedTiers.includes(tier);
         const tierMissions = MISSIONS.filter((m) => m.tier === tier);
         const tierStars = getTierStars(tier);
         const required = getStarsRequiredForTier(tier);

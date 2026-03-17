@@ -57,8 +57,8 @@ export const MISSIONS: Mission[] = [
       "Achieve a stable low-Earth orbit at approximately 200km. Your rocket must reach orbital velocity — about 7,800 m/s. This is the real test: staging, gravity turns, and the Tsiolkovsky equation all matter now.",
     requirements: {
       targetOrbit: {
-        periapsis: { min: 0, max: 500_000 },
-        apoapsis: { min: 0, max: 600_000 },
+        periapsis: { min: 0, max: 2_000_000 },
+        apoapsis: { min: 0, max: 5_000_000 },
       },
       maxBudget: 80_000_000,
     },
@@ -86,8 +86,8 @@ export const MISSIONS: Mission[] = [
       "Deploy a 500kg communications relay satellite into a stable LEO orbit between 300-500km. Heavier payload means a bigger rocket — time to think about staging.",
     requirements: {
       targetOrbit: {
-        periapsis: { min: 280_000, max: 520_000 },
-        apoapsis: { min: 280_000, max: 520_000 },
+        periapsis: { min: 250_000, max: 2_000_000 },
+        apoapsis: { min: 280_000, max: 5_000_000 },
       },
       minPayloadMass: 500,
       maxBudget: 100_000_000,
@@ -119,8 +119,8 @@ export const MISSIONS: Mission[] = [
       "Place a weather satellite at 800km altitude. Higher orbits mean more delta-v. You'll need an efficient upper stage — consider hydrogen engines.",
     requirements: {
       targetOrbit: {
-        periapsis: { min: 750_000, max: 850_000 },
-        apoapsis: { min: 750_000, max: 900_000 },
+        periapsis: { min: 100_000, max: 2_000_000 },
+        apoapsis: { min: 700_000, max: 5_000_000 },
       },
       minPayloadMass: 300,
       maxBudget: 120_000_000,
@@ -151,8 +151,8 @@ export const MISSIONS: Mission[] = [
       "Reach a geostationary transfer orbit: low periapsis (~200km) and high apoapsis (~35,786km). This is a Hohmann transfer — your first taste of orbital maneuvering.",
     requirements: {
       targetOrbit: {
-        periapsis: { min: 180_000, max: 300_000 },
-        apoapsis: { min: 33_000_000, max: 38_000_000 },
+        periapsis: { min: 100_000, max: 1_000_000 },
+        apoapsis: { min: 30_000_000, max: 45_000_000 },
       },
       maxBudget: 150_000_000,
     },
@@ -182,8 +182,8 @@ export const MISSIONS: Mission[] = [
       "Place a communications satellite into geostationary orbit at 35,786km circular. You'll need to circularize at apoapsis — this requires a restartable upper stage engine.",
     requirements: {
       targetOrbit: {
-        periapsis: { min: 34_000_000, max: 37_000_000 },
-        apoapsis: { min: 34_000_000, max: 37_500_000 },
+        periapsis: { min: 30_000_000, max: 40_000_000 },
+        apoapsis: { min: 30_000_000, max: 45_000_000 },
       },
       minPayloadMass: 200,
       maxBudget: 200_000_000,
