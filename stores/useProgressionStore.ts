@@ -51,9 +51,18 @@ export const useProgressionStore = create<ProgressionState>((set, get) => ({
       return;
     }
 
+    // Strip heavy flight history before persisting (saves localStorage space)
+    const lightResult: MissionResult = {
+      ...result,
+      flightResult: {
+        ...result.flightResult,
+        history: [], // Don't persist full flight history
+      },
+    };
+
     const updatedResults = {
       ...missionResults,
-      [result.missionId]: result,
+      [result.missionId]: lightResult,
     };
 
     // Recalculate total stars
