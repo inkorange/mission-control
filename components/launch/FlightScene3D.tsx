@@ -149,10 +149,13 @@ function TargetOrbitRing({ targetOrbit }: { targetOrbit: OrbitalTarget }) {
 }
 
 function CurrentOrbitLine() {
-  const { currentOrbit } = useFlightStore();
+  const { currentOrbit, currentSnapshot } = useFlightStore();
 
   const points = useMemo(() => {
     if (!currentOrbit || currentOrbit.eccentricity >= 1 || currentOrbit.semiMajorAxis <= 0) return null;
+    // Only show Earth orbit line when spacecraft is in Earth's SOI
+    if (currentOrbit.referenceBody && currentOrbit.referenceBody !== "earth") return null;
+    if (currentSnapshot?.currentSOIBody && currentSnapshot.currentSOIBody !== "earth") return null;
     const apoR = altToRadius(currentOrbit.apoapsis);
     const periR = altToRadius(Math.max(0, currentOrbit.periapsis));
     const a = (apoR + periR) / 2;
@@ -714,19 +717,17 @@ function TrajectoryTrail() {
 
 /** Camera: close to rocket, Earth's curvature fills background */
 function FollowCamera({ missionTier }: { missionTier: number }) {
-  const { currentSnapshot } = useFlightStore();
   const { camera, gl } = useThree();
-  const targetPos = useRef(new THREE.Vector3(0, 3, 5));
-  const targetLookAt = useRef(new THREE.Vector3(0, 0, 0));
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const orbitAngle = useRef({ theta: 0, phi: 0.3 }); // spherical angles around rocket
-  const userHasRotated = useRef(false); // true once user drags — disables auto-camera
+  const isDeepSpace = useRef(false);
 
-  // Mouse/touch handlers for camera rotation (always active during flight)
+  // Mouse handlers for deep space camera rotation
   useEffect(() => {
     const canvas = gl.domElement;
     const onDown = (e: MouseEvent) => {
+      if (!isDeepSpace.current) return;
       isDragging.current = true;
       dragStart.current = { x: e.clientX, y: e.clientY };
     };
@@ -734,79 +735,80 @@ function FollowCamera({ missionTier }: { missionTier: number }) {
       if (!isDragging.current) return;
       const dx = (e.clientX - dragStart.current.x) * 0.005;
       const dy = (e.clientY - dragStart.current.y) * 0.005;
-      if (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001) {
-        userHasRotated.current = true;
-      }
       orbitAngle.current.theta += dx;
       orbitAngle.current.phi = Math.max(-1.2, Math.min(1.2, orbitAngle.current.phi + dy));
       dragStart.current = { x: e.clientX, y: e.clientY };
     };
     const onUp = () => { isDragging.current = false; };
-    // Double-click resets to auto-camera
-    const onDblClick = () => {
-      userHasRotated.current = false;
-      orbitAngle.current.theta = 0;
-      orbitAngle.current.phi = 0.3;
-    };
     canvas.addEventListener("mousedown", onDown);
     canvas.addEventListener("mousemove", onMove);
     canvas.addEventListener("mouseup", onUp);
     canvas.addEventListener("mouseleave", onUp);
-    canvas.addEventListener("dblclick", onDblClick);
     return () => {
       canvas.removeEventListener("mousedown", onDown);
       canvas.removeEventListener("mousemove", onMove);
       canvas.removeEventListener("mouseup", onUp);
       canvas.removeEventListener("mouseleave", onUp);
-      canvas.removeEventListener("dblclick", onDblClick);
     };
   }, [gl]);
 
   useFrame(() => {
-    if (!currentSnapshot) {
+    // Read snapshot directly from store every frame — avoids stale React closure
+    const snapshot = useFlightStore.getState().currentSnapshot;
+
+    if (!snapshot) {
       // Pre-launch: position camera to see Cape Canaveral launch site
       const launchPoint = new THREE.Vector3(EARTH_VISUAL_R, 0, 0)
         .applyQuaternion(ORBITAL_PLANE_Q);
       const outward = launchPoint.clone().normalize();
-      targetPos.current.copy(launchPoint)
+      const pos = launchPoint.clone()
         .add(outward.clone().multiplyScalar(1.5))
         .add(new THREE.Vector3(0, 1.5, 0));
-      targetLookAt.current.copy(launchPoint).multiplyScalar(0.8);
-    } else {
-      // Flight: follow rocket in world space
-      const rocketPos = simToWorld(currentSnapshot.position, currentSnapshot.altitude);
-      const altScene = currentSnapshot.altitude * SCALE;
-
-      // Compute camera distance based on altitude
-      const deepSpaceThreshold = 50_000_000 * SCALE; // 50,000 km
-      const isDeepSpace = altScene > deepSpaceThreshold && missionTier >= 3;
-
-      const camDist = isDeepSpace
-        ? Math.max(5, Math.log10(altScene) * 8)
-        : Math.max(0.08, altScene * 2.5 + 0.05);
-
-      if (userHasRotated.current) {
-        // User-controlled orbit: spherical coordinates centered on rocket
-        const { theta, phi } = orbitAngle.current;
-        const camOffset = new THREE.Vector3(
-          Math.cos(phi) * Math.sin(theta) * camDist,
-          Math.sin(phi) * camDist,
-          Math.cos(phi) * Math.cos(theta) * camDist
-        );
-        targetPos.current.copy(rocketPos).add(camOffset);
-      } else {
-        // Auto-camera: offset from rocket using outward + up direction
-        const outward = rocketPos.clone().normalize();
-        targetPos.current.copy(rocketPos)
-          .add(outward.clone().multiplyScalar(camDist * 0.5))
-          .add(new THREE.Vector3(0, camDist * 0.7, 0));
-      }
-
-      targetLookAt.current.copy(rocketPos);
+      const lookAt = launchPoint.clone().multiplyScalar(0.8);
+      camera.position.lerp(pos, 0.04);
+      camera.lookAt(lookAt);
+      return;
     }
 
-    camera.position.lerp(targetPos.current, 0.04);
-    camera.lookAt(targetLookAt.current);
+    // Flight: follow rocket in world space
+    const rocketPos = simToWorld(snapshot.position, snapshot.altitude);
+    const altScene = snapshot.altitude * SCALE;
+
+    // Deep space: pull camera back, allow user rotation around rocket
+    const deepSpaceThreshold = 50_000_000 * SCALE; // 50,000 km
+    if (altScene > deepSpaceThreshold && missionTier >= 3) {
+      isDeepSpace.current = true;
+
+      const camDist = Math.max(5, Math.log10(altScene) * 8);
+      const { theta, phi } = orbitAngle.current;
+
+      // Build a local coordinate frame centered on the rocket:
+      // "outward" = away from Earth, "up" = world Y, "right" = cross product
+      const outward = rocketPos.clone().normalize();
+      const worldUp = new THREE.Vector3(0, 1, 0);
+      const right = new THREE.Vector3().crossVectors(worldUp, outward).normalize();
+      const localUp = new THREE.Vector3().crossVectors(outward, right).normalize();
+
+      // Spherical offset in this local frame
+      const camOffset = new THREE.Vector3()
+        .addScaledVector(outward, Math.cos(phi) * Math.cos(theta) * camDist)
+        .addScaledVector(right, Math.cos(phi) * Math.sin(theta) * camDist)
+        .addScaledVector(localUp, Math.sin(phi) * camDist);
+
+      // Snap — no lerp — rocket must stay perfectly centered
+      camera.position.copy(rocketPos).add(camOffset);
+      camera.lookAt(rocketPos);
+    } else {
+      isDeepSpace.current = false;
+      // Near-Earth flight: close follow camera (no user rotation)
+      const camDist = Math.max(0.08, altScene * 2.5 + 0.05);
+      const outward = rocketPos.clone().normalize();
+      const pos = rocketPos.clone()
+        .add(outward.clone().multiplyScalar(camDist * 0.5))
+        .add(new THREE.Vector3(0, camDist * 0.7, 0));
+      camera.position.lerp(pos, 0.04);
+      camera.lookAt(rocketPos);
+    }
   });
 
   return null;

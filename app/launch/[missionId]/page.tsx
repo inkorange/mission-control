@@ -240,11 +240,20 @@ export default function LaunchPage({
       }
     }
 
-    const throttlePercent = Math.round(targetThrottle * 100);
-    if (throttlePercent !== throttleRef.current) {
-      throttleRef.current = throttlePercent;
-      setThrottleValue(throttlePercent);
-      setThrottle(targetThrottle);
+    if (targetBody) {
+      // Target body missions: sim handles throttle via auto-cutoff, just update display
+      const simThrottle = Math.round((currentSnapshot.throttle ?? 1) * 100);
+      if (simThrottle !== throttleRef.current) {
+        throttleRef.current = simThrottle;
+        setThrottleValue(simThrottle);
+      }
+    } else {
+      const throttlePercent = Math.round(targetThrottle * 100);
+      if (throttlePercent !== throttleRef.current) {
+        throttleRef.current = throttlePercent;
+        setThrottleValue(throttlePercent);
+        setThrottle(targetThrottle);
+      }
     }
 
   }, [autopilot, currentSnapshot, result, setPitch, setThrottle]);

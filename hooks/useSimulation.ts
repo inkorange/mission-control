@@ -116,34 +116,13 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
             const targetBody = mission?.requirements.targetBody;
 
             if (targetBody) {
-              // Target body mission: check if trajectory reaches the target
-              const distToTarget = snap?.distanceToTarget;
-              const body = sim.getResult().history?.[0]; // just need any ref
-
-              // Check if distance is decreasing (heading toward target)
-              const recentHistory = sim.getResult().history.slice(-20);
-              let approaching = false;
-              if (recentHistory.length >= 2) {
-                const first = recentHistory[0].distanceToTarget;
-                const last = recentHistory[recentHistory.length - 1].distanceToTarget;
-                if (first != null && last != null && last < first) {
-                  approaching = true;
-                }
-              }
-
-              if (approaching && distToTarget != null) {
-                // On course — bump to 10,000x warp and let the sim's own detection handle it
-                sim.setTimeScale(10000);
-                useFlightStore.setState({ timeScale: 10000 });
-                validationStartRef.current = performance.now(); // Reset timer for another 8s
-              } else {
-                // Not approaching target — lost to space
-                const result = sim.getResult();
-                result.outcome = "crash"; // Shows "Lost to Space" for high altitude
-                endFlight(result);
-                saveToProgression(result);
-                return;
-              }
+              // Target body mission: bump to max warp and let the sim coast
+              // The sim has its own time limit (7 days for Moon) and detection (flyby, SOI entry)
+              // Don't try to predict success/failure from distance — the Moon might be anywhere in its orbit
+              sim.setTimeScale(10000);
+              useFlightStore.setState({ timeScale: 10000 });
+              // Don't reset timer — let it keep coasting without further interruption
+              validationStartRef.current = 0; // Disable further timeout checks
             } else {
               // Earth orbit mission: check altitude against target
               const target = mission?.requirements.targetOrbit;

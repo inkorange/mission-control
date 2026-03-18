@@ -356,19 +356,11 @@ export class FlightSimulator {
           this.throttle = 0;
           this.throttleLocked = true; // Prevent React autopilot from overriding
 
-          // Trigger validation (auto-warp coast) if we haven't reached target yet
-          if (!this.validationTriggered) {
+          // Trigger validation (auto-warp coast) for Earth orbit missions only
+          // Target body missions: just cut throttle silently — user controls warp
+          if (!this.validationTriggered && !targetBody) {
             const targetAltMin = target && isFinite(target.apoapsis.min) ? target.apoapsis.min : 0;
-            const bodyName = this.activeBodies.find(b => b.id === targetBody)?.name ?? targetBody;
-
-            if (targetBody) {
-              this.validationTriggered = true;
-              this.events.push({
-                time: this.state.time,
-                type: "orbit_achieved",
-                description: `Transfer trajectory locked — coasting to ${bodyName}...`,
-              });
-            } else if (targetAltMin > 0 && this.state.altitude < targetAltMin) {
+            if (targetAltMin > 0 && this.state.altitude < targetAltMin) {
               this.validationTriggered = true;
               this.events.push({
                 time: this.state.time,
@@ -605,9 +597,9 @@ export class FlightSimulator {
 
     // ===================================================================
     // UNIFIED MISSION SUCCESS/FAILURE DETECTION
-    // Used for ALL Earth orbit missions (with or without target orbit)
+    // Used for ALL missions (Earth orbit AND target body)
     // ===================================================================
-    if (!this.mission.requirements.targetBody && this.state.altitude > 80_000) {
+    if (this.state.altitude > 80_000) {
       const r = magnitude(this.state.position);
       const v = magnitude(this.state.velocity);
       const vCircular = Math.sqrt(EARTH_MU / r);
@@ -621,8 +613,9 @@ export class FlightSimulator {
         .slice(this.currentStageIndex)
         .reduce((sum, s) => sum + s.fuelRemaining, 0);
 
-      // --- SUCCESS CHECK 1: Reached target altitude with sufficient velocity ---
-      if (target && targetAltMin > 0 && this.state.altitude >= targetAltMin && v >= vCircular * 0.7) {
+      // --- SUCCESS CHECK 1: Reached target altitude ---
+      // For high orbits/transfers, velocity at apoapsis is naturally very low — just check altitude
+      if (target && targetAltMin > 0 && this.state.altitude >= targetAltMin) {
         this.outcome = "mission_complete";
         this.isRunning = false;
         this.events.push({
