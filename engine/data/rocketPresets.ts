@@ -56,21 +56,24 @@ const PRESETS: Record<string, RocketPreset> = {
     ],
   },
 
-  // GTO Transfer — LEO to 35,786km apoapsis
+  // GTO Transfer — 5 light stages, TWR > 1 on all
   "2-2": {
     stages: [
-      { engines: [{ id: "spartan-1", count: 8 }], tanks: ["solid-large", "solid-large"] },
-      { engines: [{ id: "kestrel-9", count: 4 }], tanks: ["kerolox-large"] },
+      { engines: [{ id: "spartan-1", count: 6 }], tanks: ["solid-medium", "solid-medium"] },
+      { engines: [{ id: "kestrel-7", count: 4 }], tanks: ["kerolox-medium"] },
       { engines: [{ id: "kestrel-7", count: 2 }], tanks: ["kerolox-medium"] },
+      { engines: [{ id: "kestrel-7", count: 1 }], tanks: ["kerolox-small"] },
+      { engines: [{ id: "kestrel-7", count: 1 }], tanks: ["kerolox-small"] },
     ],
   },
 
-  // ComSat Deploy — GEO circular at 35,786km
+  // ComSat Deploy — Kestrel-7 for ascent, Titan RL hydrogen upper stage for GEO
   "2-3": {
     stages: [
-      { engines: [{ id: "spartan-1", count: 8 }], tanks: ["solid-large", "solid-large"] },
-      { engines: [{ id: "kestrel-9", count: 4 }], tanks: ["kerolox-large"] },
-      { engines: [{ id: "kestrel-7", count: 2 }], tanks: ["kerolox-medium"] },
+      { engines: [{ id: "spartan-1", count: 7 }], tanks: ["solid-medium", "solid-medium"] },
+      { engines: [{ id: "kestrel-7", count: 4 }], tanks: ["kerolox-medium"] },
+      { engines: [{ id: "kestrel-7", count: 3 }], tanks: ["kerolox-medium"] },
+      { engines: [{ id: "kestrel-7", count: 1 }], tanks: ["kerolox-small"] },
       { engines: [{ id: "titan-rl", count: 1 }], tanks: ["hydrolox-medium"] },
     ],
   },

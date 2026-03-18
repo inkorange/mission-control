@@ -225,14 +225,22 @@ export default function LaunchPage({
         targetThrottle = 0;
       }
     } else if (orb && alt > 100_000) {
-      // For orbital/transfer missions: burn until mission goals are met
-      // The sim's checkTermination will detect success and stop the sim
-      // Only cut throttle if we somehow overshoot into a clearly stable orbit
-      // Cut throttle when approaching target orbit — use apoapsis max as the limit
+      // For orbital/transfer missions: only cut throttle when orbit meets target
       if (targetOrbit) {
+        const periMin = isFinite(targetOrbit.periapsis.min) ? targetOrbit.periapsis.min : 0;
+        const apoMin = isFinite(targetOrbit.apoapsis.min) ? targetOrbit.apoapsis.min : 0;
         const apoMax = isFinite(targetOrbit.apoapsis.max) ? targetOrbit.apoapsis.max : Infinity;
-        // Cut at 70% of apoapsis max to avoid overshooting at high warp
-        if (orb.apoapsis > apoMax * 0.7 && orb.periapsis > -100_000) {
+
+        // Cut throttle only when orbit actually meets target requirements
+        const periOk = orb.periapsis >= periMin * 0.9;
+        const apoOk = orb.apoapsis >= apoMin * 0.9;
+        const apoNotOver = orb.apoapsis <= apoMax * 1.2;
+
+        if (periOk && apoOk && apoNotOver) {
+          targetThrottle = 0;
+        }
+        // Safety: also cut if we're massively overshooting apoapsis
+        if (orb.apoapsis > apoMax * 1.5) {
           targetThrottle = 0;
         }
       } else if (orb.periapsis > 100_000) {
@@ -647,6 +655,28 @@ export default function LaunchPage({
               fuelCapacity={rocketConfig.stages[0]?.fuelCapacity ?? 0}
               targetBody={mission.requirements.targetBody}
             />
+          </div>
+
+          {/* Time Warp — always visible */}
+          <div className="p-3 border-b border-[var(--border)]">
+            <span className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-[var(--muted)] block mb-1.5">
+              Time Warp
+            </span>
+            <div className="flex gap-1 flex-wrap">
+              {[1, 5, 10, 50, 100, 1000, 10000].map((w) => (
+                <button
+                  key={w}
+                  onClick={() => setWarp(w)}
+                  className={`flex-1 min-w-[2rem] py-1 font-mono text-[0.6rem] rounded-sm border transition-colors ${
+                    timeScale === w
+                      ? "border-[var(--nasa-blue-light)] bg-[var(--nasa-blue)]/20 text-[var(--nasa-blue-light)]"
+                      : "border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:border-[var(--foreground)]/30"
+                  }`}
+                >
+                  {w >= 1000 ? `${w / 1000}k` : w}x
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Autopilot toggle — available during countdown and flight */}

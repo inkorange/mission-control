@@ -20,6 +20,9 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
   const simRef = useRef<FlightSimulator | null>(null);
   const rafRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
+  const launchWallTimeRef = useRef<number>(0); // Wall-clock timestamp when simulation started
+  const deferredResultRef = useRef<FlightResult | null>(null); // Success result waiting to be shown
+  const MIN_FLIGHT_WALL_TIME = 20_000; // 20 seconds real time before showing success
 
   const {
     isActive,
@@ -69,6 +72,18 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
       const dtReal = Math.min((timestamp - lastTimeRef.current) / 1000, 0.1); // Cap at 100ms
       lastTimeRef.current = timestamp;
 
+      // Check if a deferred success result is ready to be shown
+      if (deferredResultRef.current && !useFlightStore.getState().result) {
+        const wallElapsed = performance.now() - launchWallTimeRef.current;
+        if (wallElapsed >= MIN_FLIGHT_WALL_TIME) {
+          const result = deferredResultRef.current;
+          deferredResultRef.current = null;
+          useFlightStore.setState({ result, isValidating: false, timeScale: 500 });
+          sim.setTimeScale(500);
+          saveToProgression(result);
+        }
+      }
+
       if (!useFlightStore.getState().isPaused && sim.running) {
         sim.tick(dtReal);
 
@@ -83,9 +98,10 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
         setEvents(sim.flightEvents);
 
         // Check if orbit validation should start (auto-warp to coast to apoapsis)
-        if (sim.isValidating && !useFlightStore.getState().isValidating) {
+        // Only trigger if no result yet (don't re-trigger after success)
+        if (sim.isValidating && !useFlightStore.getState().isValidating && !useFlightStore.getState().result) {
           useFlightStore.getState().startValidating();
-          sim.setTimeScale(1000); // Sync simulator with store
+          sim.setTimeScale(1000);
         }
 
         // Check if sim ended
@@ -97,19 +113,21 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
             result.outcome === "escaped";
 
           if (isSuccess) {
-            if (!useFlightStore.getState().result) {
-              // First time detecting success — save result, restore pre-validation warp speed
-              const restoreScale = useFlightStore.getState().isValidating
-                ? Math.max(1, Math.min(100, useFlightStore.getState().timeScale))
-                : useFlightStore.getState().timeScale;
-              useFlightStore.setState({ result, isValidating: false, timeScale: restoreScale });
-              sim.setTimeScale(restoreScale);
+            const wallElapsed = performance.now() - launchWallTimeRef.current;
+
+            if (!useFlightStore.getState().result && wallElapsed >= MIN_FLIGHT_WALL_TIME) {
+              // Enough real time has passed — show result immediately
+              useFlightStore.setState({ result, isValidating: false, timeScale: 500 });
+              sim.setTimeScale(500);
               saveToProgression(result);
+            } else if (!useFlightStore.getState().result) {
+              // Too early — defer the result and keep flying
+              deferredResultRef.current = result;
             }
             // Resume sim so player can watch the orbit
             sim.resume();
           } else {
-            // Failure — stop everything
+            // Failure — stop everything immediately regardless of wall time
             endFlight(result);
             saveToProgression(result);
             return;
@@ -132,6 +150,8 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
     // Sync simulator timeScale with the store's preferred speed
     sim.setTimeScale(useFlightStore.getState().timeScale);
     lastTimeRef.current = 0;
+    launchWallTimeRef.current = performance.now();
+    deferredResultRef.current = null;
     rafRef.current = requestAnimationFrame(loop);
   }, [getSimulator, reset, startFlight, loop]);
 
