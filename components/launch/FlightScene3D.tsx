@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useMemo, useState, Suspense } from "react";
+import { useRef, useMemo, useState, useEffect, Suspense } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Line, Html } from "@react-three/drei";
+import { Line, Html, useTexture } from "@react-three/drei";
 import {
   EffectComposer,
   Bloom,
@@ -183,10 +183,11 @@ function CurrentOrbitLine() {
   );
 }
 
-/** Render the Moon as a small sphere at its computed position */
+/** Render the Moon as a textured sphere at its computed position */
 function MoonBody({ simTime }: { simTime: number }) {
   const meshRef = useRef<THREE.Mesh>(null);
   const { currentSnapshot } = useFlightStore();
+  const moonTexture = useTexture("/textures/moon.jpg");
 
   useFrame(() => {
     if (!meshRef.current) return;
@@ -203,8 +204,8 @@ function MoonBody({ simTime }: { simTime: number }) {
   return (
     <group>
       <mesh ref={meshRef}>
-        <sphereGeometry args={[moonVisualR, 32, 32]} />
-        <meshStandardMaterial color="#c8c8c0" roughness={0.9} />
+        <sphereGeometry args={[moonVisualR, 64, 64]} />
+        <meshStandardMaterial map={moonTexture} roughness={0.95} metalness={0.05} />
       </mesh>
     </group>
   );
@@ -445,8 +446,10 @@ function JettisonedStages() {
         // Get rocket's current world position and orientation
         const pos = simToScene(currentSnapshot.position, currentSnapshot.altitude);
         const altScene = currentSnapshot.altitude * SCALE;
-        const totalH = stageData.reduce((s, d) => s + d.height + 0.06, 0);
-        const scale = Math.max(0.015, altScene * 0.15 + 0.01) / Math.max(totalH, 1);
+        const totalModelH = stageData.length > 0
+          ? stageData[stageData.length - 1].yOffset + stageData[stageData.length - 1].height / 2
+          : 1;
+        const scale = Math.max(0.015, altScene * 0.15 + 0.01) / Math.max(totalModelH, 1);
 
         // Rocket orientation
         const outward = pos.clone().normalize();
@@ -460,6 +463,9 @@ function JettisonedStages() {
           new THREE.Vector3(0, 1, 0),
           rocketUp
         );
+
+        // Spawn position: offset along rocket axis to the dropped stage's actual position
+        const stageWorldPos = pos.clone().addScaledVector(rocketUp, dropped.yOffset * scale);
 
         // Drift direction: opposite to rocket heading + slight random sideways
         const driftDir = rocketUp.clone().negate();
@@ -476,7 +482,7 @@ function JettisonedStages() {
         const newEntry: JettisonedStageData = {
           id: ++jettisonCounter,
           spawnTime: currentSnapshot.time,
-          position: pos.clone(),
+          position: stageWorldPos,
           quaternion: quat.clone(),
           scale,
           radius: r,
@@ -550,12 +556,19 @@ function FlightRocketModel() {
     if (!groupRef.current || !currentSnapshot) return;
 
     const pos = simToScene(currentSnapshot.position, currentSnapshot.altitude);
-    groupRef.current.position.copy(pos);
 
     // Scale to be visible relative to camera distance
     const altScene = currentSnapshot.altitude * SCALE;
     const desiredHeight = Math.max(0.015, altScene * 0.15 + 0.01);
-    groupRef.current.scale.setScalar(desiredHeight / totalModelHeight);
+    const scale = desiredHeight / totalModelHeight;
+    groupRef.current.scale.setScalar(scale);
+
+    // Offset position so the bottom of the rocket sits on the surface point,
+    // not the center of the model
+    const outwardDir = pos.clone().normalize();
+    const bottomOffset = stageData.length > 0 ? stageData[0].yOffset - stageData[0].height / 2 : 0;
+    const halfHeight = (totalModelHeight / 2 - bottomOffset) * scale;
+    groupRef.current.position.copy(pos).addScaledVector(outwardDir, halfHeight);
 
     // Orient rocket: +Y aligns with flight direction (radial + prograde)
     const outward = pos.clone().normalize();
@@ -580,13 +593,9 @@ function FlightRocketModel() {
   const throttle = currentSnapshot.throttle ?? 0;
   const activeStage = currentSnapshot.currentStage;
 
-  // Only render stages from activeStage upward (lower stages jettisoned)
-  let adjY = 0;
-  const visible = stageData.slice(activeStage).map((s) => {
-    const yOff = adjY + s.height / 2;
-    adjY += s.height + 0.06;
-    return { ...s, yOffset: yOff };
-  });
+  // Only render stages from activeStage upward — keep original Y offsets
+  // so the rocket doesn't shift position when stages are jettisoned
+  const visible = stageData.slice(activeStage);
 
   return (
     <group ref={groupRef}>
@@ -706,9 +715,52 @@ function TrajectoryTrail() {
 /** Camera: close to rocket, Earth's curvature fills background */
 function FollowCamera({ missionTier }: { missionTier: number }) {
   const { currentSnapshot } = useFlightStore();
-  const { camera } = useThree();
+  const { camera, gl } = useThree();
   const targetPos = useRef(new THREE.Vector3(0, 3, 5));
   const targetLookAt = useRef(new THREE.Vector3(0, 0, 0));
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const orbitAngle = useRef({ theta: 0, phi: 0.3 }); // spherical angles around rocket
+  const userHasRotated = useRef(false); // true once user drags — disables auto-camera
+
+  // Mouse/touch handlers for camera rotation (always active during flight)
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const onDown = (e: MouseEvent) => {
+      isDragging.current = true;
+      dragStart.current = { x: e.clientX, y: e.clientY };
+    };
+    const onMove = (e: MouseEvent) => {
+      if (!isDragging.current) return;
+      const dx = (e.clientX - dragStart.current.x) * 0.005;
+      const dy = (e.clientY - dragStart.current.y) * 0.005;
+      if (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001) {
+        userHasRotated.current = true;
+      }
+      orbitAngle.current.theta += dx;
+      orbitAngle.current.phi = Math.max(-1.2, Math.min(1.2, orbitAngle.current.phi + dy));
+      dragStart.current = { x: e.clientX, y: e.clientY };
+    };
+    const onUp = () => { isDragging.current = false; };
+    // Double-click resets to auto-camera
+    const onDblClick = () => {
+      userHasRotated.current = false;
+      orbitAngle.current.theta = 0;
+      orbitAngle.current.phi = 0.3;
+    };
+    canvas.addEventListener("mousedown", onDown);
+    canvas.addEventListener("mousemove", onMove);
+    canvas.addEventListener("mouseup", onUp);
+    canvas.addEventListener("mouseleave", onUp);
+    canvas.addEventListener("dblclick", onDblClick);
+    return () => {
+      canvas.removeEventListener("mousedown", onDown);
+      canvas.removeEventListener("mousemove", onMove);
+      canvas.removeEventListener("mouseup", onUp);
+      canvas.removeEventListener("mouseleave", onUp);
+      canvas.removeEventListener("dblclick", onDblClick);
+    };
+  }, [gl]);
 
   useFrame(() => {
     if (!currentSnapshot) {
@@ -725,19 +777,30 @@ function FollowCamera({ missionTier }: { missionTier: number }) {
       const rocketPos = simToWorld(currentSnapshot.position, currentSnapshot.altitude);
       const altScene = currentSnapshot.altitude * SCALE;
 
-      // For deep space missions, scale camera distance more aggressively
-      let camDist: number;
-      if (missionTier >= 3 && altScene > 10) {
-        // Deep space: logarithmic camera distance
-        camDist = Math.max(2, Math.log10(altScene) * 8);
-      } else {
-        camDist = Math.max(0.08, altScene * 2.5 + 0.05);
-      }
+      // Compute camera distance based on altitude
+      const deepSpaceThreshold = 50_000_000 * SCALE; // 50,000 km
+      const isDeepSpace = altScene > deepSpaceThreshold && missionTier >= 3;
 
-      const outward = rocketPos.clone().normalize();
-      targetPos.current.copy(rocketPos)
-        .add(outward.clone().multiplyScalar(camDist * 0.5))
-        .add(new THREE.Vector3(0, camDist * 0.7, 0));
+      const camDist = isDeepSpace
+        ? Math.max(5, Math.log10(altScene) * 8)
+        : Math.max(0.08, altScene * 2.5 + 0.05);
+
+      if (userHasRotated.current) {
+        // User-controlled orbit: spherical coordinates centered on rocket
+        const { theta, phi } = orbitAngle.current;
+        const camOffset = new THREE.Vector3(
+          Math.cos(phi) * Math.sin(theta) * camDist,
+          Math.sin(phi) * camDist,
+          Math.cos(phi) * Math.cos(theta) * camDist
+        );
+        targetPos.current.copy(rocketPos).add(camOffset);
+      } else {
+        // Auto-camera: offset from rocket using outward + up direction
+        const outward = rocketPos.clone().normalize();
+        targetPos.current.copy(rocketPos)
+          .add(outward.clone().multiplyScalar(camDist * 0.5))
+          .add(new THREE.Vector3(0, camDist * 0.7, 0));
+      }
 
       targetLookAt.current.copy(rocketPos);
     }
@@ -752,6 +815,7 @@ function FollowCamera({ missionTier }: { missionTier: number }) {
 // --- Inner 3D scene ---
 
 function FlightSceneInner({ targetOrbit, mission }: { targetOrbit?: OrbitalTarget; mission?: Mission }) {
+  const { currentSnapshot } = useFlightStore();
   const activeBodies = useMemo(() => {
     if (!mission) return [];
     return getActiveBodies(mission);
@@ -769,20 +833,20 @@ function FlightSceneInner({ targetOrbit, mission }: { targetOrbit?: OrbitalTarge
       {/* Ambient — keep dark side slightly visible */}
       <ambientLight intensity={0.15} color="#ffffff" />
 
-      <StarField radius={50} />
-      <EarthSphere radius={EARTH_VISUAL_R} showAtmosphere rotationSpeed={0.002} atmosphereIntensity={0.04} />
+      <StarField radius={500} />
+      <EarthSphere radius={EARTH_VISUAL_R} showAtmosphere rotationSpeed={currentSnapshot ? 0.002 : 0} atmosphereIntensity={0.04} />
 
       {/* Orbital plane — rotated so launch is from Cape Canaveral */}
       <group quaternion={ORBITAL_PLANE_Q}>
         <KarmanRing />
-        {targetOrbit && <TargetOrbitRing targetOrbit={targetOrbit} />}
+        {targetOrbit && !mission?.requirements.targetBody && <TargetOrbitRing targetOrbit={targetOrbit} />}
         <CurrentOrbitLine />
         {/* TrajectoryTrail removed — was choppy at high warp */}
         <FlightRocketModel />
         <JettisonedStages />
 
-        {/* Moon */}
-        {moonBody && <MoonBody simTime={0} />}
+        {/* Moon — always visible */}
+        <MoonBody simTime={0} />
         {moonBody && <SOIRing body={moonBody} simTime={0} />}
 
         {/* Distant body direction markers */}
@@ -827,7 +891,7 @@ export default function FlightScene3D({ targetOrbit, mission }: FlightScene3DPro
         </div>
       )}
       <Canvas
-        camera={{ fov: 50, near: 0.001, far: 500, position: [0, 3, 5] }}
+        camera={{ fov: 50, near: 0.001, far: 1000, position: [0, 3, 5] }}
         gl={{
           antialias: true,
           toneMapping: THREE.ACESFilmicToneMapping,

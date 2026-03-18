@@ -67,14 +67,14 @@ const PRESETS: Record<string, RocketPreset> = {
     ],
   },
 
-  // ComSat Deploy — Kestrel-7 for ascent, Titan RL hydrogen upper stage for GEO
+  // ComSat Deploy — same approach as GTO, reach GEO altitude
   "2-3": {
     stages: [
-      { engines: [{ id: "spartan-1", count: 7 }], tanks: ["solid-medium", "solid-medium"] },
+      { engines: [{ id: "spartan-1", count: 6 }], tanks: ["solid-medium", "solid-medium"] },
       { engines: [{ id: "kestrel-7", count: 4 }], tanks: ["kerolox-medium"] },
-      { engines: [{ id: "kestrel-7", count: 3 }], tanks: ["kerolox-medium"] },
+      { engines: [{ id: "kestrel-7", count: 2 }], tanks: ["kerolox-medium"] },
       { engines: [{ id: "kestrel-7", count: 1 }], tanks: ["kerolox-small"] },
-      { engines: [{ id: "titan-rl", count: 1 }], tanks: ["hydrolox-medium"] },
+      { engines: [{ id: "kestrel-7", count: 1 }], tanks: ["kerolox-small"] },
     ],
   },
 

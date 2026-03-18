@@ -225,22 +225,14 @@ export default function LaunchPage({
         targetThrottle = 0;
       }
     } else if (orb && alt > 100_000) {
-      // For orbital/transfer missions: only cut throttle when orbit meets target
-      if (targetOrbit) {
-        const periMin = isFinite(targetOrbit.periapsis.min) ? targetOrbit.periapsis.min : 0;
-        const apoMin = isFinite(targetOrbit.apoapsis.min) ? targetOrbit.apoapsis.min : 0;
+      if (targetBody) {
+        // Target body missions: let the sim's auto-cutoff handle throttle
+        // Read back the sim's throttle state so React doesn't override it
+        targetThrottle = currentSnapshot.throttle;
+      } else if (targetOrbit) {
+        // Earth orbit missions: cut when orbit approaches target
         const apoMax = isFinite(targetOrbit.apoapsis.max) ? targetOrbit.apoapsis.max : Infinity;
-
-        // Cut throttle only when orbit actually meets target requirements
-        const periOk = orb.periapsis >= periMin * 0.9;
-        const apoOk = orb.apoapsis >= apoMin * 0.9;
-        const apoNotOver = orb.apoapsis <= apoMax * 1.2;
-
-        if (periOk && apoOk && apoNotOver) {
-          targetThrottle = 0;
-        }
-        // Safety: also cut if we're massively overshooting apoapsis
-        if (orb.apoapsis > apoMax * 1.5) {
+        if (isFinite(apoMax) && orb.apoapsis > apoMax * 0.7 && orb.periapsis > -100_000) {
           targetThrottle = 0;
         }
       } else if (orb.periapsis > 100_000) {
@@ -417,13 +409,21 @@ export default function LaunchPage({
         <div className="flex-1 relative">
           <FlightScene3D targetOrbit={mission.requirements.targetOrbit} mission={mission} />
 
-          {/* Pitch arc overlay */}
+          {/* Pitch arc overlay — fades out during validation / post-success */}
           {hasLaunched && !result && (
-            <>
-              <PitchArcControl
-                pitch={pitchValue}
-                onPitchChange={handlePitchChange}
-              />
+            <div
+              className="absolute inset-0 z-20 pointer-events-none"
+              style={{
+                opacity: isValidating ? 0 : 1,
+                transition: "opacity 1.5s ease-out",
+              }}
+            >
+              <div className="pointer-events-auto">
+                <PitchArcControl
+                  pitch={pitchValue}
+                  onPitchChange={handlePitchChange}
+                />
+              </div>
               <GuidanceTimeline
                 snapshot={currentSnapshot}
                 pitch={pitchValue}
@@ -436,7 +436,7 @@ export default function LaunchPage({
                 pitch={pitchValue}
                 hasResult={!!result}
               />
-            </>
+            </div>
           )}
 
           {/* Pre-launch overlay */}
@@ -561,7 +561,7 @@ export default function LaunchPage({
                 <div className="text-center mb-5">
                   <span className="font-mono text-[1rem] tracking-[0.2em] uppercase font-bold block text-[var(--nasa-red)]">
                     {result.outcome === "crash"
-                      ? "Vehicle Lost"
+                      ? (result.maxAltitude > 500_000_000 ? "Lost to Space" : "Vehicle Lost")
                       : result.outcome === "aborted"
                         ? "Mission Aborted"
                         : result.outcome === "suborbital"

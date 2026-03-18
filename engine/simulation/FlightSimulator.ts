@@ -56,6 +56,7 @@ export class FlightSimulator {
   private validationTriggered: boolean;
   private validationApoapsis: number;
   private outcomeReached: boolean; // Prevents re-triggering success after resume
+  private throttleLocked: boolean; // Prevents external throttle override after auto-cutoff
   private launchAngle: number;
 
   // Multi-body
@@ -142,6 +143,7 @@ export class FlightSimulator {
     this.validationTriggered = false;
     this.validationApoapsis = 0;
     this.outcomeReached = false;
+    this.throttleLocked = false;
     this.launchAngle = Math.atan2(this.state.position.y, this.state.position.x);
 
     // Multi-body setup
@@ -219,6 +221,9 @@ export class FlightSimulator {
 
   /** Set throttle (0-1) */
   setThrottle(value: number): void {
+    // Auto-cutoff has locked throttle — ignore external changes
+    if (this.throttleLocked) return;
+
     const stage = this.stages[this.currentStageIndex];
     if (!stage) return;
 
@@ -316,23 +321,61 @@ export class FlightSimulator {
 
     // Auto-cutoff: if orbit matches target, kill thrust to prevent overshooting
     // This runs every physics step so it catches the target even at high warp
-    if (this.state.altitude > 100_000 && this.mission.requirements.targetOrbit && !this.outcomeReached) {
+    if (this.state.altitude > 100_000 && !this.outcomeReached) {
       const target = this.mission.requirements.targetOrbit;
-      const apoMax = isFinite(target.apoapsis.max) ? target.apoapsis.max : Infinity;
-      if (isFinite(apoMax)) {
-        const checkElements = orbitalElementsFromState(this.state.position, this.state.velocity);
-        if (checkElements.apoapsis > apoMax * 0.7 && checkElements.periapsis > -100_000) {
-          this.throttle = 0;
+      const targetBody = this.mission.requirements.targetBody;
 
-          // If we haven't reached the target altitude yet, trigger validation (auto-warp coast)
-          const targetAltMin = isFinite(target.apoapsis.min) ? target.apoapsis.min : 0;
-          if (targetAltMin > 0 && this.state.altitude < targetAltMin && !this.validationTriggered) {
-            this.validationTriggered = true;
-            this.events.push({
-              time: this.state.time,
-              type: "orbit_achieved",
-              description: `Orbit confirmed — coasting to ${(checkElements.apoapsis / 1000).toFixed(0)}km for validation...`,
-            });
+      // Determine the cutoff apoapsis:
+      // - For Earth orbit missions: use target.apoapsis.max
+      // - For target body missions: use the body's orbital distance (reach it, don't overshoot)
+      let cutoffApoapsis = Infinity;
+      if (target && isFinite(target.apoapsis.max)) {
+        cutoffApoapsis = target.apoapsis.max;
+      } else if (targetBody) {
+        const body = this.activeBodies.find((b) => b.id === targetBody);
+        if (body) {
+          cutoffApoapsis = body.orbitRadius * 1.1; // 10% past the body's orbit
+        }
+      }
+
+      if (isFinite(cutoffApoapsis)) {
+        const checkElements = orbitalElementsFromState(this.state.position, this.state.velocity);
+        // For hyperbolic orbits, apoapsis is negative. Use vis-viva to check if
+        // the orbit would reach the target distance instead.
+        const r = magnitude(this.state.position);
+        const v = magnitude(this.state.velocity);
+        // Velocity needed at current r to have apoapsis at cutoffApoapsis + Earth radius
+        const targetR = cutoffApoapsis + 6_371_000;
+        const aTransfer = (r + targetR) / 2;
+        const vNeeded = Math.sqrt(EARTH_MU * (2 / r - 1 / aTransfer));
+        const reachedTransferVelocity = v >= vNeeded;
+
+        const apoapsisInRange = checkElements.apoapsis > cutoffApoapsis * 0.7 && checkElements.periapsis > -100_000;
+
+        if (apoapsisInRange || reachedTransferVelocity) {
+          this.throttle = 0;
+          this.throttleLocked = true; // Prevent React autopilot from overriding
+
+          // Trigger validation (auto-warp coast) if we haven't reached target yet
+          if (!this.validationTriggered) {
+            const targetAltMin = target && isFinite(target.apoapsis.min) ? target.apoapsis.min : 0;
+            const bodyName = this.activeBodies.find(b => b.id === targetBody)?.name ?? targetBody;
+
+            if (targetBody) {
+              this.validationTriggered = true;
+              this.events.push({
+                time: this.state.time,
+                type: "orbit_achieved",
+                description: `Transfer trajectory locked — coasting to ${bodyName}...`,
+              });
+            } else if (targetAltMin > 0 && this.state.altitude < targetAltMin) {
+              this.validationTriggered = true;
+              this.events.push({
+                time: this.state.time,
+                type: "orbit_achieved",
+                description: `Orbit confirmed — coasting to ${(checkElements.apoapsis / 1000).toFixed(0)}km for validation...`,
+              });
+            }
           }
         }
       }
@@ -590,14 +633,15 @@ export class FlightSimulator {
         return;
       }
 
-      // --- SUCCESS CHECK 2: No target orbit, any stable orbit counts ---
-      if (!target) {
+      // --- SUCCESS CHECK 2: Any stable orbit (no target, or target with min=0 meaning "any orbit") ---
+      const isAnyOrbitOk = !target || (targetAltMin === 0);
+      if (isAnyOrbitOk) {
         const rDir = normalize(this.state.position);
         const radialV = dot(rDir, this.state.velocity);
         const tangentialV = Math.sqrt(Math.max(0, v * v - radialV * radialV));
 
         if (tangentialV >= vCircular * 0.99 && Math.abs(radialV) < vCircular * 0.15) {
-          this.outcome = "orbit_achieved";
+          this.outcome = target ? "mission_complete" : "orbit_achieved";
           this.isRunning = false;
           this.events.push({
             time: this.state.time,
@@ -645,16 +689,102 @@ export class FlightSimulator {
 
         // Stable orbit
         if (elements.periapsis > 0) {
-          this.outcome = "orbit_achieved";
+          // Check if orbit satisfies the target requirements
+          const meetsTarget = target
+            ? elements.periapsis >= (isFinite(target.periapsis.min) ? target.periapsis.min : 0) &&
+              elements.apoapsis >= (isFinite(target.apoapsis.min) ? target.apoapsis.min : 0) &&
+              elements.apoapsis <= (isFinite(target.apoapsis.max) ? target.apoapsis.max : Infinity)
+            : false;
+          this.outcome = meetsTarget ? "mission_complete" : "orbit_achieved";
           this.isRunning = false;
           this.events.push({
             time: this.state.time,
             type: "orbit_achieved",
-            description: targetAltMin > 0
+            description: targetAltMin > 0 && !meetsTarget
               ? `Orbit achieved (apoapsis: ${(elements.apoapsis / 1000).toFixed(0)}km) — target was ${(targetAltMin / 1000).toFixed(0)}km. Need more delta-v!`
               : `Orbit achieved at ${(this.state.altitude / 1000).toFixed(0)}km!`,
           });
           return;
+        }
+      }
+    }
+
+    // Lost to space — rocket has escaped too far from Earth
+    // For non-escape missions, if altitude exceeds 2x the Moon's distance, it's lost
+    const maxAlt = this.mission.requirements.targetBody === "mars" ? 300e9
+      : this.mission.requirements.targetBody === "jupiter" ? 1e12
+      : this.mission.requirements.targetBody === "saturn" ? 2e12
+      : 800_000_000; // 800,000 km (2x Moon distance) for lunar / Earth orbit missions
+
+    if (this.state.altitude > maxAlt) {
+      this.outcome = "crash"; // "Lost to space"
+      this.isRunning = false;
+      this.events.push({
+        time: this.state.time,
+        type: "abort",
+        description: `Lost to space — exceeded ${(maxAlt / 1e6).toFixed(0)}Mm from Earth`,
+      });
+      return;
+    }
+
+    // Time limit for target body missions — if coasting for too long, make a determination
+    // Lunar transfer ~3 days, Mars ~9 months. Allow generous limits.
+    if (this.mission.requirements.targetBody) {
+      const targetId = this.mission.requirements.targetBody;
+      const maxSimTime: Record<string, number> = {
+        moon: 7 * 86400,        // 7 days
+        mars: 400 * 86400,      // 400 days
+        jupiter: 2000 * 86400,  // 2000 days
+        saturn: 3000 * 86400,   // 3000 days
+      };
+      const limit = maxSimTime[targetId] ?? 30 * 86400;
+
+      if (this.state.time > limit) {
+        const dist = distanceToBody(this.state.position, targetId, this.bodyPositions);
+        const body = this.activeBodies.find((b) => b.id === targetId);
+        const inSOI = this.currentSOIBody === targetId;
+
+        if (inSOI) {
+          // Made it to the target's SOI — partial success
+          this.outcome = "target_reached";
+          this.isRunning = false;
+          this.events.push({
+            time: this.state.time,
+            type: "target_reached",
+            description: `Reached ${body?.name ?? targetId} after ${(this.state.time / 86400).toFixed(1)} days`,
+          });
+        } else {
+          // Didn't reach target in time — failed
+          this.outcome = "fuel_exhausted";
+          this.isRunning = false;
+          this.events.push({
+            time: this.state.time,
+            type: "burn_stop",
+            description: `Failed to reach ${body?.name ?? targetId} — distance: ${dist ? (dist / 1000).toFixed(0) + 'km' : 'unknown'}`,
+          });
+        }
+        return;
+      }
+    }
+
+    // Auto-warp for target body missions: once fuel is exhausted and heading outward, speed up
+    if (this.mission.requirements.targetBody && !this.validationTriggered) {
+      const remainingFuel = this.stages
+        .slice(this.currentStageIndex)
+        .reduce((sum, s) => sum + s.fuelRemaining, 0);
+
+      if (remainingFuel <= 0 && this.state.altitude > 200_000) {
+        const targetId = this.mission.requirements.targetBody;
+        const dist = distanceToBody(this.state.position, targetId, this.bodyPositions);
+
+        // If distance to target is decreasing or we're in a transfer orbit, trigger validation
+        if (dist !== null) {
+          this.validationTriggered = true;
+          this.events.push({
+            time: this.state.time,
+            type: "orbit_achieved",
+            description: `Transfer trajectory — coasting to ${this.activeBodies.find(b => b.id === targetId)?.name ?? targetId} (${(dist / 1000).toFixed(0)}km away)...`,
+          });
         }
       }
     }

@@ -21,8 +21,10 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
   const rafRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
   const launchWallTimeRef = useRef<number>(0); // Wall-clock timestamp when simulation started
+  const validationStartRef = useRef<number>(0); // Wall-clock when validation started
   const deferredResultRef = useRef<FlightResult | null>(null); // Success result waiting to be shown
   const MIN_FLIGHT_WALL_TIME = 20_000; // 20 seconds real time before showing success
+  const VALIDATION_TIMEOUT = 8_000; // 8 seconds real time to validate orbit
 
   const {
     isActive,
@@ -102,6 +104,68 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
         if (sim.isValidating && !useFlightStore.getState().isValidating && !useFlightStore.getState().result) {
           useFlightStore.getState().startValidating();
           sim.setTimeScale(1000);
+          validationStartRef.current = performance.now();
+        }
+
+        // Validation timeout — after 8s real time, force a determination
+        if (useFlightStore.getState().isValidating && validationStartRef.current > 0
+            && !useFlightStore.getState().result) {
+          const valElapsed = performance.now() - validationStartRef.current;
+          if (valElapsed >= VALIDATION_TIMEOUT) {
+            const snap = useFlightStore.getState().currentSnapshot;
+            const targetBody = mission?.requirements.targetBody;
+
+            if (targetBody) {
+              // Target body mission: check if trajectory reaches the target
+              const distToTarget = snap?.distanceToTarget;
+              const body = sim.getResult().history?.[0]; // just need any ref
+
+              // Check if distance is decreasing (heading toward target)
+              const recentHistory = sim.getResult().history.slice(-20);
+              let approaching = false;
+              if (recentHistory.length >= 2) {
+                const first = recentHistory[0].distanceToTarget;
+                const last = recentHistory[recentHistory.length - 1].distanceToTarget;
+                if (first != null && last != null && last < first) {
+                  approaching = true;
+                }
+              }
+
+              if (approaching && distToTarget != null) {
+                // On course — bump to 10,000x warp and let the sim's own detection handle it
+                sim.setTimeScale(10000);
+                useFlightStore.setState({ timeScale: 10000 });
+                validationStartRef.current = performance.now(); // Reset timer for another 8s
+              } else {
+                // Not approaching target — lost to space
+                const result = sim.getResult();
+                result.outcome = "crash"; // Shows "Lost to Space" for high altitude
+                endFlight(result);
+                saveToProgression(result);
+                return;
+              }
+            } else {
+              // Earth orbit mission: check altitude against target
+              const target = mission?.requirements.targetOrbit;
+              const targetAlt = target && isFinite(target.apoapsis.min) ? target.apoapsis.min : 0;
+              const currentAlt = snap?.altitude ?? 0;
+
+              if (currentAlt >= targetAlt * 0.9) {
+                const result = sim.getResult();
+                result.outcome = "mission_complete";
+                useFlightStore.setState({ result, isValidating: false, timeScale: 500 });
+                sim.setTimeScale(500);
+                saveToProgression(result);
+                sim.resume();
+              } else {
+                const result = sim.getResult();
+                result.outcome = "orbit_achieved";
+                endFlight(result);
+                saveToProgression(result);
+                return;
+              }
+            }
+          }
         }
 
         // Check if sim ended
@@ -151,6 +215,7 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
     sim.setTimeScale(useFlightStore.getState().timeScale);
     lastTimeRef.current = 0;
     launchWallTimeRef.current = performance.now();
+    validationStartRef.current = 0;
     deferredResultRef.current = null;
     rafRef.current = requestAnimationFrame(loop);
   }, [getSimulator, reset, startFlight, loop]);

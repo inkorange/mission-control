@@ -182,7 +182,7 @@ export const MISSIONS: Mission[] = [
       "Place a communications satellite into geostationary orbit at 35,786km circular. You'll need to circularize at apoapsis — this requires a restartable upper stage engine.",
     requirements: {
       targetOrbit: {
-        periapsis: { min: 30_000_000, max: 40_000_000 },
+        periapsis: { min: 100_000, max: 40_000_000 },
         apoapsis: { min: 30_000_000, max: 45_000_000 },
       },
       minPayloadMass: 200,
