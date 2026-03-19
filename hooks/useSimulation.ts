@@ -80,8 +80,11 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
         if (wallElapsed >= MIN_FLIGHT_WALL_TIME) {
           const result = deferredResultRef.current;
           deferredResultRef.current = null;
-          useFlightStore.setState({ result, isValidating: false, timeScale: 500 });
-          sim.setTimeScale(500);
+          const isSuborbital = mission?.requirements.targetOrbit?.periapsis.min === -Infinity &&
+            !mission?.requirements.targetBody;
+          const showTimeScale = isSuborbital ? useFlightStore.getState().timeScale : 500;
+          useFlightStore.setState({ result, isValidating: false, timeScale: showTimeScale });
+          if (!isSuborbital) sim.setTimeScale(500);
           saveToProgression(result);
         }
       }
@@ -157,17 +160,20 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
 
           if (isSuccess) {
             const wallElapsed = performance.now() - launchWallTimeRef.current;
+            const isSuborbital = mission?.requirements.targetOrbit?.periapsis.min === -Infinity &&
+              !mission?.requirements.targetBody;
 
-            if (!useFlightStore.getState().result && wallElapsed >= MIN_FLIGHT_WALL_TIME) {
-              // Enough real time has passed — show result immediately
-              useFlightStore.setState({ result, isValidating: false, timeScale: 500 });
-              sim.setTimeScale(500);
+            if (!useFlightStore.getState().result && (isSuborbital || wallElapsed >= MIN_FLIGHT_WALL_TIME)) {
+              // Suborbital: show immediately (banner at the moment target altitude is crossed)
+              // Orbital: only show after min flight time has elapsed
+              useFlightStore.setState({ result, isValidating: false, timeScale: isSuborbital ? useFlightStore.getState().timeScale : 500 });
+              if (!isSuborbital) sim.setTimeScale(500);
               saveToProgression(result);
             } else if (!useFlightStore.getState().result) {
-              // Too early — defer the result and keep flying
+              // Too early for orbital — defer the result and keep flying
               deferredResultRef.current = result;
             }
-            // Resume sim so player can watch the orbit
+            // Resume sim so rocket continues its natural arc
             sim.resume();
           } else {
             // Failure — stop everything immediately regardless of wall time

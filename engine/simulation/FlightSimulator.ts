@@ -477,15 +477,22 @@ export class FlightSimulator {
   }
 
   private checkTermination(): void {
-    // Skip termination checks if outcome already reached and sim was resumed
-    if (this.outcomeReached) return;
-
-    // Crash check (Earth surface)
+    // Crash check (Earth surface) — runs even after success so rocket doesn't go underground
     if (this.state.altitude < 0) {
-      this.outcome = "crash";
+      const isSuborbitalMission =
+        this.mission.requirements.targetOrbit?.periapsis.min === -Infinity &&
+        !this.mission.requirements.targetBody;
+      // If suborbital target was reached, sim was resumed for post-success viewing — stop cleanly
+      if (!this.outcomeReached) {
+        this.outcome =
+          isSuborbitalMission && !this.suborbitalTargetReached ? "suborbital" : "crash";
+      }
       this.isRunning = false;
       return;
     }
+
+    // Skip all other termination checks if outcome already reached and sim was resumed for viewing
+    if (this.outcomeReached) return;
 
     // Crash check: impact on a target body
     if (this.currentSOIBody !== "earth") {
@@ -519,21 +526,18 @@ export class FlightSimulator {
 
       if (isSuborbitalMission && !this.suborbitalTargetReached && this.state.altitude >= target.apoapsis.min) {
         this.suborbitalTargetReached = true;
+        this.outcome = "mission_complete";
+        this.isRunning = false;
         this.events.push({
           time: this.state.time,
           type: "orbit_achieved",
           description: `Altitude ${(this.state.altitude / 1000).toFixed(0)}km reached — mission complete!`,
         });
+        return;
       }
 
-      if (isSuborbitalMission && this.suborbitalTargetReached) {
-        const radialDir = normalize(this.state.position);
-        const radialVelocity = dot(radialDir, this.state.velocity);
-        if (radialVelocity < 0) {
-          this.outcome = "mission_complete";
-          this.isRunning = false;
-        }
-        return;
+      if (isSuborbitalMission) {
+        return; // Suborbital mission: no further checks needed
       }
     }
 
@@ -674,7 +678,11 @@ export class FlightSimulator {
         }
 
         // Periapsis below surface = suborbital (will crash)
-        if (elements.periapsis < 0) {
+        // Skip for actual suborbital missions — they should coast to their natural apoapsis first
+        const isSuborbitalMission =
+          this.mission.requirements.targetOrbit?.periapsis.min === -Infinity &&
+          !this.mission.requirements.targetBody;
+        if (elements.periapsis < 0 && !isSuborbitalMission) {
           this.outcome = "suborbital";
           this.isRunning = false;
           return;
