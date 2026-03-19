@@ -58,7 +58,7 @@ export default function LaunchPage({
   const [pitchValue, setPitchValue] = useState(0);
   const [targetPitchValue, setTargetPitchValue] = useState(0);
   const [throttleValue, setThrottleValue] = useState(100);
-  const [autopilot, setAutopilot] = useState(false);
+  const [autopilot, setAutopilot] = useState(true);
   const countdownStartRef = useRef<number>(0);
   const countdownRafRef = useRef<number>(0);
 
