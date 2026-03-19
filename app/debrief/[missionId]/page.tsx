@@ -233,6 +233,7 @@ export default function DebriefPage({
                 finalOrbit={flight.finalOrbit}
                 outcome={flight.outcome}
                 keyEvents={analysis.keyEvents}
+                projectedPath={flight.projectedPath}
               />
             </div>
           </div>

@@ -2,9 +2,10 @@
 
 import { useMemo } from "react";
 import { EARTH_RADIUS, KARMAN_LINE } from "@/engine/physics/constants";
-import type { FlightSnapshot, OrbitalElements, FlightOutcome } from "@/types/physics";
+import type { FlightSnapshot, OrbitalElements, FlightOutcome, ProjectedPoint } from "@/types/physics";
 import type { OrbitalTarget } from "@/types/mission";
 import type { FlightKeyEvent } from "@/engine/analysis/FlightAnalyzer";
+import { magnitude } from "@/lib/math";
 
 interface TrajectoryReplayProps {
   history: FlightSnapshot[];
@@ -12,6 +13,7 @@ interface TrajectoryReplayProps {
   finalOrbit: OrbitalElements | null;
   outcome: FlightOutcome;
   keyEvents?: FlightKeyEvent[];
+  projectedPath?: ProjectedPoint[];
 }
 
 /**
@@ -27,6 +29,7 @@ export default function TrajectoryReplay({
   finalOrbit,
   outcome,
   keyEvents = [],
+  projectedPath,
 }: TrajectoryReplayProps) {
   const viewSize = 600;
   const cx = viewSize / 2;
@@ -40,6 +43,11 @@ export default function TrajectoryReplay({
     for (const s of history) {
       if (s.altitude > peak) peak = s.altitude;
     }
+    if (projectedPath) {
+      for (const p of projectedPath) {
+        if (p.altitude > peak) peak = p.altitude;
+      }
+    }
     if (targetOrbit) {
       const apo = isFinite(targetOrbit.apoapsis.max)
         ? targetOrbit.apoapsis.max
@@ -50,7 +58,7 @@ export default function TrajectoryReplay({
     }
     if (finalOrbit && finalOrbit.apoapsis > peak) peak = finalOrbit.apoapsis;
     return Math.max(peak, 100_000) * 1.25;
-  }, [history, targetOrbit, finalOrbit]);
+  }, [history, projectedPath, targetOrbit, finalOrbit]);
 
   // Visual layout: Earth gets a fixed portion of the viewport,
   // and altitudes are exaggerated to fill the remaining space.
@@ -82,6 +90,28 @@ export default function TrajectoryReplay({
     }
     return out;
   }, [history]);
+
+  // Projected coast path SVG string (dashed line to target body)
+  const projectedPathString = useMemo(() => {
+    if (!projectedPath || projectedPath.length < 2) return null;
+    return projectedPath
+      .map((p) => {
+        const { sx, sy } = toSvg(p.position, p.altitude);
+        return `${sx.toFixed(1)},${sy.toFixed(1)}`;
+      })
+      .join(" ");
+  }, [projectedPath, maxAlt]);
+
+  // Moon marker: position at the last projected point's bodyPositions
+  const moonMarker = useMemo(() => {
+    if (!projectedPath || projectedPath.length === 0) return null;
+    const last = projectedPath[projectedPath.length - 1];
+    const moonPos = last.bodyPositions["moon"];
+    if (!moonPos) return null;
+    const moonAlt = magnitude(moonPos) - EARTH_RADIUS;
+    const { sx, sy } = toSvg(moonPos, moonAlt);
+    return { sx, sy };
+  }, [projectedPath, maxAlt]);
 
   // Build SVG polyline from position data
   const pathString = useMemo(() => {
@@ -167,6 +197,23 @@ export default function TrajectoryReplay({
       if (sy < minY) minY = sy;
       if (sy > maxY) maxY = sy;
     }
+    // Include projected path in bounding box
+    if (projectedPath) {
+      for (const p of projectedPath) {
+        const { sx, sy } = toSvg(p.position, p.altitude);
+        if (sx < minX) minX = sx;
+        if (sx > maxX) maxX = sx;
+        if (sy < minY) minY = sy;
+        if (sy > maxY) maxY = sy;
+      }
+    }
+    // Include Moon marker if present
+    if (moonMarker) {
+      if (moonMarker.sx < minX) minX = moonMarker.sx;
+      if (moonMarker.sx > maxX) maxX = moonMarker.sx;
+      if (moonMarker.sy < minY) minY = moonMarker.sy;
+      if (moonMarker.sy > maxY) maxY = moonMarker.sy;
+    }
 
     // Include the Earth's edge nearest to the trajectory for context
     // Find the closest point on Earth's circle to the trajectory center
@@ -202,7 +249,7 @@ export default function TrajectoryReplay({
     const centerY = (minY + maxY) / 2;
 
     return { vb: `${(centerX - size / 2).toFixed(1)} ${(centerY - size / 2).toFixed(1)} ${size.toFixed(1)} ${size.toFixed(1)}`, size };
-  }, [pathPoints, maxAlt]);
+  }, [pathPoints, projectedPath, moonMarker, maxAlt]);
 
   // Scale factor so strokes/fonts stay consistent regardless of zoom level
   // Normalizes to look as if rendered in the full 600px viewBox
@@ -375,6 +422,44 @@ export default function TrajectoryReplay({
           strokeLinejoin="round"
           opacity="0.8"
         />
+      )}
+
+      {/* Projected coast path (dashed) — trans-lunar / interplanetary coast */}
+      {projectedPathString && (
+        <polyline
+          points={projectedPathString}
+          fill="none"
+          stroke="var(--data)"
+          strokeWidth={1.5 * zoomScale}
+          strokeDasharray={`${6 * zoomScale} ${4 * zoomScale}`}
+          strokeLinecap="round"
+          opacity="0.45"
+        />
+      )}
+
+      {/* Moon body marker at arrival point */}
+      {moonMarker && (
+        <g>
+          <circle
+            cx={moonMarker.sx}
+            cy={moonMarker.sy}
+            r={6 * zoomScale}
+            fill="#888"
+            stroke="#aaa"
+            strokeWidth={1 * zoomScale}
+            opacity="0.85"
+          />
+          <text
+            x={moonMarker.sx + 9 * zoomScale}
+            y={moonMarker.sy + 3 * zoomScale}
+            fontSize={11 * zoomScale}
+            fill="#bbb"
+            opacity="0.8"
+            className="font-mono"
+          >
+            Moon
+          </text>
+        </g>
       )}
 
       {/* Stage separation markers */}

@@ -80,11 +80,7 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
         if (wallElapsed >= MIN_FLIGHT_WALL_TIME) {
           const result = deferredResultRef.current;
           deferredResultRef.current = null;
-          const isSuborbital = mission?.requirements.targetOrbit?.periapsis.min === -Infinity &&
-            !mission?.requirements.targetBody;
-          const showTimeScale = isSuborbital ? useFlightStore.getState().timeScale : 500;
-          useFlightStore.setState({ result, isValidating: false, timeScale: showTimeScale });
-          if (!isSuborbital) sim.setTimeScale(500);
+          useFlightStore.setState({ result, isValidating: false, timeScale: useFlightStore.getState().timeScale });
           saveToProgression(result);
         }
       }
@@ -164,10 +160,9 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
               !mission?.requirements.targetBody;
 
             if (!useFlightStore.getState().result && (isSuborbital || wallElapsed >= MIN_FLIGHT_WALL_TIME)) {
-              // Suborbital: show immediately (banner at the moment target altitude is crossed)
-              // Orbital: only show after min flight time has elapsed
-              useFlightStore.setState({ result, isValidating: false, timeScale: isSuborbital ? useFlightStore.getState().timeScale : 500 });
-              if (!isSuborbital) sim.setTimeScale(500);
+              // Keep the user's current time warp — don't override it on success
+              const currentTimeScale = useFlightStore.getState().timeScale;
+              useFlightStore.setState({ result, isValidating: false, timeScale: currentTimeScale });
               saveToProgression(result);
             } else if (!useFlightStore.getState().result) {
               // Too early for orbital — defer the result and keep flying

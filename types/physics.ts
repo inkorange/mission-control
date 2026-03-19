@@ -51,6 +51,14 @@ export type FlightOutcome =
   | "aborted"
   | "fuel_exhausted";
 
+/** A single point along a projected (post-cutoff, no-thrust) coast trajectory. */
+export interface ProjectedPoint {
+  time: number;
+  position: Vector2D;
+  altitude: number;
+  bodyPositions: Record<string, Vector2D>;
+}
+
 export interface FlightResult {
   outcome: FlightOutcome;
   history: FlightSnapshot[];
@@ -59,6 +67,8 @@ export interface FlightResult {
   maxAltitude: number;
   flightDuration: number;
   closestApproach: Record<string, number>;
+  /** Projected coast trajectory for target-body missions (no thrust after TLI cutoff). */
+  projectedPath?: ProjectedPoint[];
 }
 
 export interface HohmannTransfer {

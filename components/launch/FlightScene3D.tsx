@@ -779,12 +779,19 @@ function FollowCamera({ missionTier }: { missionTier: number }) {
     if (altScene > deepSpaceThreshold && missionTier >= 3) {
       isDeepSpace.current = true;
 
-      const camDist = Math.max(5, Math.log10(altScene) * 8);
+      // The rocket model scales its height to ~15% of altScene so it stays visible.
+      // halfHeight ≈ 7.5% of altScene mirrors FlightRocketModel's desiredHeight/2 logic.
+      // We orbit around the rocket's visual center (not its base) so it stays centered.
+      const outward = rocketPos.clone().normalize();
+      const rocketHalfHeight = Math.max(0.01, altScene * 0.075);
+      const rocketCenter = rocketPos.clone().addScaledVector(outward, rocketHalfHeight);
+
+      // Keep camera at 5× halfHeight so the full rocket fits in view with margin
+      const camDist = Math.max(5, rocketHalfHeight * 5);
       const { theta, phi } = orbitAngle.current;
 
       // Build a local coordinate frame centered on the rocket:
       // "outward" = away from Earth, "up" = world Y, "right" = cross product
-      const outward = rocketPos.clone().normalize();
       const worldUp = new THREE.Vector3(0, 1, 0);
       const right = new THREE.Vector3().crossVectors(worldUp, outward).normalize();
       const localUp = new THREE.Vector3().crossVectors(outward, right).normalize();
@@ -796,8 +803,8 @@ function FollowCamera({ missionTier }: { missionTier: number }) {
         .addScaledVector(localUp, Math.sin(phi) * camDist);
 
       // Snap — no lerp — rocket must stay perfectly centered
-      camera.position.copy(rocketPos).add(camOffset);
-      camera.lookAt(rocketPos);
+      camera.position.copy(rocketCenter).add(camOffset);
+      camera.lookAt(rocketCenter);
     } else {
       isDeepSpace.current = false;
       // Near-Earth flight: close follow camera (no user rotation)

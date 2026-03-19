@@ -178,20 +178,20 @@ export default function LaunchPage({
       targetPitch = alt < 50_000 ? 0 : Math.min(10, (alt - 50_000) / 10_000);
 
     } else if (missionCategory === "transfer") {
-      // Reach LEO first (~200km), then burn prograde to build transfer velocity
-      // Phase 1: standard LEO gravity turn
-      // Phase 2: once near orbital velocity, go fully horizontal for transfer burn
-      const nearOrbital = alt > 100_000 && vel > vCirc * 0.85;
+      // Use the same proven gravity turn as low_orbit to reach parking orbit,
+      // then switch to prograde (90°) once near-orbital velocity is achieved for TLI.
+      const transferProfile: [number, number][] = [
+        [0, 0], [5_000, 0], [8_000, 5], [15_000, 12], [30_000, 25],
+        [50_000, 38], [70_000, 50], [90_000, 60], [100_000, 68],
+        [120_000, 78], [140_000, 85], [160_000, 88], [180_000, 90],
+      ];
+      const gravityTurnPitch = interpolateProfile(transferProfile, alt);
 
-      if (nearOrbital) {
-        targetPitch = 90; // Prograde burn for transfer
+      // Once in orbit (periapsis established), burn prograde for TLI
+      if (orb && orb.periapsis > 80_000) {
+        targetPitch = 90;
       } else {
-        const leoProfile: [number, number][] = [
-          [0, 0], [5_000, 0], [8_000, 5], [15_000, 12], [30_000, 25],
-          [50_000, 38], [70_000, 50], [90_000, 60], [100_000, 68],
-          [120_000, 78], [140_000, 85], [160_000, 88], [180_000, 90],
-        ];
-        targetPitch = interpolateProfile(leoProfile, alt);
+        targetPitch = gravityTurnPitch;
       }
 
     } else {

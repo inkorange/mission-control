@@ -66,6 +66,13 @@ export const SATURN: CelestialBody = {
 
 const ALL_BODIES: CelestialBody[] = [MOON, MARS, JUPITER, SATURN];
 
+// Moon's orbital phase at T=0 — calibrated so a default TLI trajectory from the launch
+// site reaches the Moon's SOI on the first pass (~5 days after launch).
+// The rocket's TLI apoapsis direction is ~203° (23° orbit arc during ascent + 180°).
+// Moon must be at 203° after 5-day transit, having started 66° earlier → 137°.
+// Using 135° gives a small margin for timing variation.
+const MOON_INITIAL_PHASE = (135 * Math.PI) / 180;
+
 /**
  * Compute a celestial body's position in Earth-centered coordinates.
  *
@@ -78,8 +85,8 @@ const ALL_BODIES: CelestialBody[] = [MOON, MARS, JUPITER, SATURN];
  */
 export function getBodyPosition(body: CelestialBody, simTime: number): Vector2D {
   if (body.parentBody === "earth") {
-    // Moon orbits Earth directly
-    const angle = (2 * Math.PI * simTime) / body.orbitalPeriod;
+    // Moon orbits Earth directly, starting at calibrated phase for TLI alignment
+    const angle = MOON_INITIAL_PHASE + (2 * Math.PI * simTime) / body.orbitalPeriod;
     return {
       x: body.orbitRadius * Math.cos(angle),
       y: body.orbitRadius * Math.sin(angle),
@@ -115,7 +122,7 @@ export function getBodyPosition(body: CelestialBody, simTime: number): Vector2D 
  */
 export function getBodyVelocity(body: CelestialBody, simTime: number): Vector2D {
   if (body.parentBody === "earth") {
-    const angle = (2 * Math.PI * simTime) / body.orbitalPeriod;
+    const angle = MOON_INITIAL_PHASE + (2 * Math.PI * simTime) / body.orbitalPeriod;
     const v = (2 * Math.PI * body.orbitRadius) / body.orbitalPeriod;
     return {
       x: -v * Math.sin(angle),
