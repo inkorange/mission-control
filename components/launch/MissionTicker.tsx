@@ -130,7 +130,7 @@ export default function MissionTicker({
       <div className="flex-shrink-0 z-10 flex items-center gap-1.5 px-2.5 bg-[var(--nasa-red)] rounded-l-sm">
         <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
         <span className="font-mono text-[0.55rem] tracking-[0.15em] uppercase text-white font-bold">
-          Live
+          Live: {missionName}
         </span>
       </div>
 

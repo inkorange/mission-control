@@ -23,7 +23,10 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
   const launchWallTimeRef = useRef<number>(0); // Wall-clock timestamp when simulation started
   const validationStartRef = useRef<number>(0); // Wall-clock when validation started
   const deferredResultRef = useRef<FlightResult | null>(null); // Success result waiting to be shown
-  const MIN_FLIGHT_WALL_TIME = 20_000; // 20 seconds real time before showing success
+  const deepSpaceCutoffRef = useRef<number>(0); // Wall-clock when TLI/transfer cutoff was detected
+  const MIN_FLIGHT_WALL_TIME = 20_000; // 20 seconds real time before showing success (Earth orbit)
+  // Deep space: 45s at 10,000× = 450,000 sim-seconds ≈ 5.2 days — enough to watch the coast to Moon
+  const DEEP_SPACE_COAST_TIME = 45_000;
   const VALIDATION_TIMEOUT = 8_000; // 8 seconds real time to validate orbit
 
   const {
@@ -76,12 +79,29 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
 
       // Check if a deferred success result is ready to be shown
       if (deferredResultRef.current && !useFlightStore.getState().result) {
-        const wallElapsed = performance.now() - launchWallTimeRef.current;
-        if (wallElapsed >= MIN_FLIGHT_WALL_TIME) {
-          const result = deferredResultRef.current;
-          deferredResultRef.current = null;
-          useFlightStore.setState({ result, isValidating: false, timeScale: useFlightStore.getState().timeScale });
-          saveToProgression(result);
+        const isDeepSpace = !!mission?.requirements.targetBody;
+
+        if (isDeepSpace) {
+          // Deep space: show after DEEP_SPACE_COAST_TIME seconds from TLI cutoff (at max warp).
+          // Timer starts the first frame after the cutoff is detected (see below).
+          if (deepSpaceCutoffRef.current > 0) {
+            const coastElapsed = performance.now() - deepSpaceCutoffRef.current;
+            if (coastElapsed >= DEEP_SPACE_COAST_TIME) {
+              const result = deferredResultRef.current;
+              deferredResultRef.current = null;
+              useFlightStore.setState({ result, isValidating: false, timeScale: useFlightStore.getState().timeScale });
+              saveToProgression(result);
+            }
+          }
+        } else {
+          // Earth orbit: show after MIN_FLIGHT_WALL_TIME from launch
+          const wallElapsed = performance.now() - launchWallTimeRef.current;
+          if (wallElapsed >= MIN_FLIGHT_WALL_TIME) {
+            const result = deferredResultRef.current;
+            deferredResultRef.current = null;
+            useFlightStore.setState({ result, isValidating: false, timeScale: useFlightStore.getState().timeScale });
+            saveToProgression(result);
+          }
         }
       }
 
@@ -104,6 +124,23 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
           useFlightStore.getState().startValidating();
           sim.setTimeScale(1000);
           validationStartRef.current = performance.now();
+        }
+
+        // Deep space coast: throttle locked for transfer orbit, coasting to target body.
+        // Auto-warp so the user watches the coast. Delay the guidance fade-out
+        // so it appears closer to the actual encounter (~60% through the coast).
+        if (sim.isCoasting && deepSpaceCutoffRef.current === 0 && !useFlightStore.getState().result) {
+          deepSpaceCutoffRef.current = performance.now();
+          sim.setTimeScale(10000);
+          setTimeScale(10000);
+        }
+
+        // Start validating overlay at ~60% through the deep space coast
+        if (deepSpaceCutoffRef.current > 0 && !useFlightStore.getState().isValidating && !useFlightStore.getState().result) {
+          const coastElapsed = performance.now() - deepSpaceCutoffRef.current;
+          if (coastElapsed >= DEEP_SPACE_COAST_TIME * 0.6) {
+            useFlightStore.getState().startValidating();
+          }
         }
 
         // Validation timeout — after 8s real time, force a determination
@@ -158,15 +195,34 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
             const wallElapsed = performance.now() - launchWallTimeRef.current;
             const isSuborbital = mission?.requirements.targetOrbit?.periapsis.min === -Infinity &&
               !mission?.requirements.targetBody;
+            const isDeepSpace = !!mission?.requirements.targetBody;
 
-            if (!useFlightStore.getState().result && (isSuborbital || wallElapsed >= MIN_FLIGHT_WALL_TIME)) {
-              // Keep the user's current time warp — don't override it on success
-              const currentTimeScale = useFlightStore.getState().timeScale;
-              useFlightStore.setState({ result, isValidating: false, timeScale: currentTimeScale });
-              saveToProgression(result);
-            } else if (!useFlightStore.getState().result) {
-              // Too early for orbital — defer the result and keep flying
-              deferredResultRef.current = result;
+            if (!useFlightStore.getState().result) {
+              if (isSuborbital) {
+                // Suborbital: show immediately
+                const currentTimeScale = useFlightStore.getState().timeScale;
+                useFlightStore.setState({ result, isValidating: false, timeScale: currentTimeScale });
+                saveToProgression(result);
+              } else if (isDeepSpace) {
+                // Deep space (lunar, Mars, etc.): always defer and run at max warp so the player
+                // watches the rocket coast toward the target body before the popup appears.
+                deferredResultRef.current = result;
+                if (deepSpaceCutoffRef.current === 0) {
+                  deepSpaceCutoffRef.current = performance.now();
+                  sim.setTimeScale(10000);
+                  setTimeScale(10000);
+                  // Fade out Guidance/FIDO — nothing actionable once transfer orbit is locked
+                  useFlightStore.getState().startValidating();
+                }
+              } else if (wallElapsed >= MIN_FLIGHT_WALL_TIME) {
+                // Earth orbit with enough wall time: show immediately
+                const currentTimeScale = useFlightStore.getState().timeScale;
+                useFlightStore.setState({ result, isValidating: false, timeScale: currentTimeScale });
+                saveToProgression(result);
+              } else {
+                // Earth orbit too early: defer
+                deferredResultRef.current = result;
+              }
             }
             // Resume sim so rocket continues its natural arc
             sim.resume();
@@ -197,6 +253,7 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
     launchWallTimeRef.current = performance.now();
     validationStartRef.current = 0;
     deferredResultRef.current = null;
+    deepSpaceCutoffRef.current = 0;
     rafRef.current = requestAnimationFrame(loop);
   }, [getSimulator, reset, startFlight, loop]);
 

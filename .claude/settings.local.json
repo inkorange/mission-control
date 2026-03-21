@@ -7,7 +7,12 @@
       "Bash(npm install:*)",
       "Bash(npx vitest run:*)",
       "Bash(npm run build:*)",
-      "WebFetch(domain:localhost)"
+      "WebFetch(domain:localhost)",
+      "Bash(npx tsx:*)",
+      "Bash(NODE_PATH=. npx tsx --tsconfig tsconfig.test.json -e \":*)",
+      "Bash(npx ts-node:*)",
+      "Bash(node test-sim.js)",
+      "Bash(git diff:*)"
     ]
   }
 }

@@ -271,6 +271,12 @@ export default function LaunchPage({
 
   const hasLaunched = launchPhase === "flight";
 
+  // True when the last stage has run dry in space — nothing left to control
+  const allFuelSpent = !!currentSnapshot &&
+    currentSnapshot.fuel <= 0 &&
+    currentSnapshot.currentStage >= stageCount - 1 &&
+    currentSnapshot.altitude > 100_000;
+
   if (!mission) {
     return (
       <div className="flex items-center justify-center h-[80vh]">
@@ -423,7 +429,7 @@ export default function LaunchPage({
             <div
               className="absolute inset-0 z-20 pointer-events-none"
               style={{
-                opacity: isValidating ? 0 : 1,
+                opacity: (isValidating || allFuelSpent) ? 0 : 1,
                 transition: "opacity 1.5s ease-out",
               }}
             >

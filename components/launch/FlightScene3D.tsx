@@ -779,15 +779,16 @@ function FollowCamera({ missionTier }: { missionTier: number }) {
     if (altScene > deepSpaceThreshold && missionTier >= 3) {
       isDeepSpace.current = true;
 
-      // The rocket model scales its height to ~15% of altScene so it stays visible.
-      // halfHeight ≈ 7.5% of altScene mirrors FlightRocketModel's desiredHeight/2 logic.
-      // We orbit around the rocket's visual center (not its base) so it stays centered.
+      // FlightRocketModel places the group at rocketPos + outward*(desiredHeight/2),
+      // then the model extends upward another desiredHeight from that point.
+      // So the visual center of the rocket is at rocketPos + outward * desiredHeight
+      // (= altScene * 0.15). Using desiredHeight/2 (0.075) was looking at the base.
       const outward = rocketPos.clone().normalize();
-      const rocketHalfHeight = Math.max(0.01, altScene * 0.075);
-      const rocketCenter = rocketPos.clone().addScaledVector(outward, rocketHalfHeight);
+      const rocketModelHeight = Math.max(0.015, altScene * 0.15 + 0.01); // matches desiredHeight in FlightRocketModel
+      const rocketCenter = rocketPos.clone().addScaledVector(outward, rocketModelHeight);
 
-      // Keep camera at 5× halfHeight so the full rocket fits in view with margin
-      const camDist = Math.max(5, rocketHalfHeight * 5);
+      // Camera distance: 2.5× model height gives good framing (same total as before)
+      const camDist = Math.max(5, rocketModelHeight * 2.5);
       const { theta, phi } = orbitAngle.current;
 
       // Build a local coordinate frame centered on the rocket:

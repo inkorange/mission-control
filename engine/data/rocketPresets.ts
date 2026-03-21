@@ -56,22 +56,24 @@ const PRESETS: Record<string, RocketPreset> = {
     ],
   },
 
-  // GTO Transfer — 5 light stages, TWR > 1 on all
+  // GTO Transfer — heavy Stage 2 gives enough delta-v for direct GTO ascent
+  // Stage 2: 6x kestrel-7 + 2x kerolox-medium → TWR 1.39, ~2400 m/s dv
+  // Stages 3-5 carry the orbit through GTO apoapsis
   "2-2": {
     stages: [
       { engines: [{ id: "spartan-1", count: 6 }], tanks: ["solid-medium", "solid-medium"] },
-      { engines: [{ id: "kestrel-7", count: 4 }], tanks: ["kerolox-medium"] },
+      { engines: [{ id: "kestrel-7", count: 6 }], tanks: ["kerolox-medium", "kerolox-medium"] },
       { engines: [{ id: "kestrel-7", count: 2 }], tanks: ["kerolox-medium"] },
       { engines: [{ id: "kestrel-7", count: 1 }], tanks: ["kerolox-small"] },
       { engines: [{ id: "kestrel-7", count: 1 }], tanks: ["kerolox-small"] },
     ],
   },
 
-  // ComSat Deploy — same approach as GTO, reach GEO altitude
+  // ComSat Deploy — same heavy-Stage-2 design; upper stages reach GTO apoapsis
   "2-3": {
     stages: [
       { engines: [{ id: "spartan-1", count: 6 }], tanks: ["solid-medium", "solid-medium"] },
-      { engines: [{ id: "kestrel-7", count: 4 }], tanks: ["kerolox-medium"] },
+      { engines: [{ id: "kestrel-7", count: 6 }], tanks: ["kerolox-medium", "kerolox-medium"] },
       { engines: [{ id: "kestrel-7", count: 2 }], tanks: ["kerolox-medium"] },
       { engines: [{ id: "kestrel-7", count: 1 }], tanks: ["kerolox-small"] },
       { engines: [{ id: "kestrel-7", count: 1 }], tanks: ["kerolox-small"] },

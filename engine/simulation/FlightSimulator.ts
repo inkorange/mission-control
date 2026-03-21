@@ -1,4 +1,4 @@
-import { EARTH_RADIUS, EARTH_MU, FIXED_DT, DEFAULT_DRAG_COEFFICIENT, DEFAULT_CROSS_SECTION, G0 } from "../physics/constants";
+import { EARTH_RADIUS, EARTH_MU, FIXED_DT, DEFAULT_DRAG_COEFFICIENT, DEFAULT_CROSS_SECTION, G0, SUN_MU, SUN_DISTANCE } from "../physics/constants";
 import { rk4Step, createLaunchState } from "../physics/trajectory";
 import type { GravBody } from "../physics/trajectory";
 import { massFlowRate } from "../physics/tsiolkovsky";
@@ -191,6 +191,11 @@ export class FlightSimulator {
     return this.validationTriggered;
   }
 
+  /** Whether the engine has been auto-cut for a transfer orbit (coasting to target body) */
+  get isCoasting(): boolean {
+    return this.throttleLocked && !this.outcome;
+  }
+
   /** Get the current sim state */
   get currentState(): SimState {
     return { ...this.state };
@@ -334,21 +339,60 @@ export class FlightSimulator {
         // Do NOT use velocity checks — they fire mid-burn before the orbit is shaped correctly.
         const body = this.activeBodies.find((b) => b.id === targetBody);
         if (body && !this.throttleLocked) {
-          // Apoapsis must reach the body's orbital altitude (distance from Earth surface).
-          // This ensures the transfer orbit actually reaches the body's orbit, not just
-          // the SOI inner edge which is 66,100 km short of the Moon's actual position.
-          const transferApoapsis = body.orbitRadius - EARTH_RADIUS;
-          const transferReached = checkElements.apoapsis >= transferApoapsis;
+          // Determine if transfer orbit reaches the target body.
+          // For cislunar bodies (Moon): check Earth-centric apoapsis.
+          // For interplanetary bodies (Mars, Jupiter, etc.): use C3 energy (hyperbolic excess
+          // velocity). Earth-centric apoapsis doesn't work because the target is outside Earth's
+          // SOI — the orbit jumps from elliptical to hyperbolic in one timestep, skipping the check.
+          const isInterplanetary = body.parentBody === "sun";
+          let transferReached = false;
+
+          if (isInterplanetary) {
+            // Required C3 for a Hohmann transfer to the target body's heliocentric orbit
+            const r_earth = SUN_DISTANCE;
+            const r_target = body.orbitRadius;
+            const a_transfer = (r_earth + r_target) / 2;
+            const v_departure = Math.sqrt(SUN_MU * (2 / r_earth - 1 / a_transfer));
+            const v_earth = Math.sqrt(SUN_MU / r_earth);
+            const v_infinity = v_departure - v_earth;
+            const requiredC3 = v_infinity * v_infinity;
+
+            // Current specific orbital energy relative to Earth
+            const r = magnitude(this.state.position);
+            const v = magnitude(this.state.velocity);
+            const currentEnergy = (v * v) / 2 - EARTH_MU / r;
+            const currentC3 = Math.max(0, 2 * currentEnergy);
+
+            transferReached = currentC3 >= requiredC3;
+          } else {
+            // Cislunar: apoapsis must reach the body's orbital altitude
+            const transferApoapsis = body.orbitRadius - EARTH_RADIUS;
+            transferReached = checkElements.apoapsis >= transferApoapsis;
+          }
 
           if (transferReached) {
             this.throttle = 0;
             this.throttleLocked = true;
-            // Do NOT set validationTriggered — outcome is set directly below, no validation needed.
-            // Setting it would cause sim.isValidating=true to fire the validation overlay in the UI.
 
             const bodyName = body.name;
 
-            // Estimate remaining ΔV across all remaining stages
+            // Flyby missions: don't declare success yet — coast to the target body
+            // and let flyby detection in checkTermination() verify the actual encounter.
+            const isFlybyMission = this.mission.requirements.targetOrbit?.periapsis.min === -Infinity;
+
+            if (isFlybyMission) {
+              this.events.push({
+                time: this.state.time,
+                type: "burn_stop",
+                description: `Transfer orbit to ${bodyName} established — coasting to target...`,
+              });
+              // Compute the projected coast path from cutoff state to target body SOI
+              this.projectedPath = this.computeProjectedPath();
+              // Don't set outcome — let the sim coast and detect the actual flyby
+              return;
+            }
+
+            // Orbit insertion missions: check if enough remaining ΔV for capture burn
             const remainingStages = this.stages.slice(this.currentStageIndex);
             let remainingDV = 0;
             let mass = this.state.mass;
@@ -360,25 +404,22 @@ export class FlightSimulator {
               mass = dryM;
             }
 
-            // Flyby needs no capture burn; orbit insertion needs ~600+ m/s
-            const isFlybyMission = this.mission.requirements.targetOrbit?.periapsis.min === -Infinity;
             const canInsertOrbit = remainingDV >= 600;
-
-            if (isFlybyMission || !canInsertOrbit) {
-              this.outcome = "target_reached";
-              this.isRunning = false;
-              this.events.push({
-                time: this.state.time,
-                type: "target_reached",
-                description: `Transfer orbit to ${bodyName} confirmed — flyby trajectory locked!`,
-              });
-            } else {
+            if (canInsertOrbit) {
               this.outcome = "mission_complete";
               this.isRunning = false;
               this.events.push({
                 time: this.state.time,
                 type: "orbit_achieved",
                 description: `Transfer to ${bodyName} confirmed — orbit insertion ΔV available!`,
+              });
+            } else {
+              this.outcome = "target_reached";
+              this.isRunning = false;
+              this.events.push({
+                time: this.state.time,
+                type: "target_reached",
+                description: `Transfer orbit to ${bodyName} confirmed — insufficient ΔV for orbit insertion`,
               });
             }
             // Compute the projected coast path from cutoff state to target body SOI
@@ -399,7 +440,7 @@ export class FlightSimulator {
           const reachedTransferVelocity = v >= vNeeded;
           const apoapsisInRange = checkElements.apoapsis > cutoffApoapsis * 0.7 && checkElements.periapsis > -100_000;
 
-          if (apoapsisInRange || reachedTransferVelocity) {
+          if (apoapsisInRange && reachedTransferVelocity) {
             this.throttle = 0;
             this.throttleLocked = true;
 
@@ -698,7 +739,9 @@ export class FlightSimulator {
       }
 
       // --- SUCCESS CHECK 3: Solar escape ---
-      if (v > escapeV && this.state.altitude > 1e7) {
+      // Skip for target body missions — escaping Earth is necessary but not sufficient;
+      // they need to actually reach the target body.
+      if (v > escapeV && this.state.altitude > 1e7 && !this.mission.requirements.targetBody) {
         this.outcome = "escaped";
         this.isRunning = false;
         this.events.push({
@@ -713,7 +756,10 @@ export class FlightSimulator {
       if (remainingFuel <= 0) {
 
         // Will the orbit reach the target? If so, coast to validate
-        if (target && targetAltMin > 0 && !this.validationTriggered) {
+        // Skip for target body missions — they use the auto-cutoff path instead,
+        // and the 90% threshold here would trigger validation before the orbit
+        // actually reaches the target body's distance.
+        if (target && targetAltMin > 0 && !this.validationTriggered && !this.mission.requirements.targetBody) {
           if (elements.apoapsis >= targetAltMin * 0.9 && elements.periapsis > -50_000) {
             this.validationTriggered = true;
             this.events.push({
@@ -738,6 +784,14 @@ export class FlightSimulator {
 
         // Stable orbit
         if (elements.periapsis > 0) {
+          // Target body missions: a stable Earth orbit is NOT success — need to reach the target body.
+          // Let the sim continue coasting (the time limit will eventually make a determination).
+          if (this.mission.requirements.targetBody) {
+            // Don't terminate — the rocket is in Earth orbit but hasn't reached the target body yet.
+            // The time limit check (below) or the target body detection (above) will handle the outcome.
+            return;
+          }
+
           // Check if orbit satisfies the target requirements
           const meetsTarget = target
             ? elements.periapsis >= (isFinite(target.periapsis.min) ? target.periapsis.min : 0) &&
@@ -845,10 +899,14 @@ export class FlightSimulator {
       closestApproach: { ...this.state.closestApproach },
     };
 
-    const dt = 3600; // 1-hour timesteps
-    const maxSteps = 30 * 24; // up to 30 days
-    const desiredSamples = 200;
-    const sampleEvery = Math.max(1, Math.floor(maxSteps / desiredSamples));
+    // Cislunar: 1-minute timesteps, up to 30 days (safe at LEO orbital period ~90 min).
+    // Interplanetary: 10-minute timesteps, up to 300 days (Mars transfer ~9 months).
+    const isInterplanetary = body.parentBody === "sun";
+    const dt = isInterplanetary ? 600 : 60;
+    const maxDays = isInterplanetary ? 300 : 30;
+    const maxSteps = maxDays * 24 * (3600 / dt);
+    // Sample rate: ~240-300 points for the trajectory
+    const sampleEvery = isInterplanetary ? 144 : 30; // every 24h or 30min
 
     for (let step = 0; step <= maxSteps; step++) {
       const bodyPositions = computeBodyPositions(this.activeBodies, state.time);
