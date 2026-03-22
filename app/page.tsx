@@ -5,6 +5,7 @@ import { useProgressionStore } from "@/stores/useProgressionStore";
 import { MISSIONS } from "@/engine/data/missions";
 import { getStarsRequiredForTier } from "@/engine/data/missions";
 import MissionBriefModal from "@/components/MissionBriefModal";
+import WelcomeModal from "@/components/WelcomeModal";
 import EarthBackground from "@/components/three/EarthBackground";
 import type { Mission, MissionTier } from "@/types/mission";
 
@@ -35,15 +36,26 @@ export default function MissionSelect() {
     totalStars,
   } = useProgressionStore();
   const [selectedMission, setSelectedMission] = useState<Mission | null>(null);
+  const [devMode, setDevMode] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+
+  useEffect(() => {
+    if (!localStorage.getItem("welcomeDismissed")) {
+      setShowWelcome(true);
+    }
+  }, []);
 
   useEffect(() => {
     loadProgress();
   }, [loadProgress]);
 
-  // Shift+O: unlock all tiers for testing
+  const COMING_SOON_TIERS: MissionTier[] = [4, 5];
+
+  // Shift+O: unlock all tiers for testing (also bypasses Coming Soon)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.shiftKey && e.key === "O") {
+        setDevMode(true);
         useProgressionStore.setState({
           unlockedTiers: [1, 2, 3, 4, 5],
         });
@@ -90,15 +102,26 @@ export default function MissionSelect() {
             </span>
           </div>
         </div>
-        <h2 className="text-2xl font-bold tracking-tight">Mission Select</h2>
-        <p className="text-base text-[var(--muted)] mt-1">
-          Select a mission to begin vehicle assembly and launch operations.
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold tracking-tight">Mission Select</h2>
+            <p className="text-base text-[var(--muted)] mt-1">
+              Select a mission to begin vehicle assembly and launch operations.
+            </p>
+          </div>
+          <button
+            onClick={() => setShowWelcome(true)}
+            className="font-mono text-[0.8rem] tracking-[0.1em] uppercase px-4 py-2 bg-[var(--nasa-blue-light)] hover:bg-[var(--nasa-blue-light)]/80 text-white rounded-sm transition-colors shadow-[0_0_12px_rgba(64,156,255,0.3)]"
+          >
+            Help
+          </button>
+        </div>
       </div>
 
       {/* Tier sections */}
       {tiers.map((tier) => {
         const unlocked = unlockedTiers.includes(tier);
+        const comingSoon = COMING_SOON_TIERS.includes(tier) && !devMode;
         const tierMissions = MISSIONS.filter((m) => m.tier === tier);
         const tierStars = getTierStars(tier);
         const required = getStarsRequiredForTier(tier);
@@ -107,15 +130,17 @@ export default function MissionSelect() {
         return (
           <div key={tier} className="mb-8">
             {/* Tier header panel */}
-            <div className="panel-glass mb-4">
+            <div className={`panel-glass mb-4 ${comingSoon ? "opacity-50" : ""}`}>
               <div className="flex items-center justify-between px-4 py-3">
                 <div className="flex items-center gap-3">
                   <span
                     className={`
                       font-mono text-[0.8rem] font-bold tracking-[0.15em] uppercase px-2 py-0.5 rounded-sm
-                      ${unlocked
-                        ? "bg-[var(--nasa-red)]/10 text-[var(--nasa-red)] border border-[var(--nasa-red)]/30"
-                        : "bg-[var(--border)]/20 text-[var(--muted)] border border-[var(--border)]"
+                      ${comingSoon
+                        ? "bg-[var(--border)]/20 text-[var(--muted)] border border-[var(--border)]"
+                        : unlocked
+                          ? "bg-[var(--nasa-red)]/10 text-[var(--nasa-red)] border border-[var(--nasa-red)]/30"
+                          : "bg-[var(--border)]/20 text-[var(--muted)] border border-[var(--border)]"
                       }
                     `}
                   >
@@ -129,7 +154,14 @@ export default function MissionSelect() {
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
-                  {!unlocked && (
+                  {comingSoon && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-[0.75rem] tracking-wider uppercase text-[var(--muted)]">
+                        Coming Soon
+                      </span>
+                    </div>
+                  )}
+                  {!comingSoon && !unlocked && (
                     <div className="flex items-center gap-1.5">
                       <span className="status-dot status-dot--warning" />
                       <span className="font-mono text-[0.75rem] tracking-wider uppercase text-[var(--nasa-gold)]">
@@ -137,7 +169,7 @@ export default function MissionSelect() {
                       </span>
                     </div>
                   )}
-                  {unlocked && (
+                  {!comingSoon && unlocked && (
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-[0.75rem] tracking-wider uppercase text-[var(--muted)]">
                         Progress
@@ -164,6 +196,31 @@ export default function MissionSelect() {
             </div>
 
             {/* Mission cards grid */}
+            {comingSoon ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {tierMissions.map((mission, missionIdx) => (
+                  <div
+                    key={mission.id}
+                    className="panel-glass opacity-40 animate-slide-up"
+                    style={{ animationDelay: `${missionIdx * 50}ms` }}
+                  >
+                    <div className="p-4">
+                      <span className="font-mono text-[0.7rem] tracking-[0.2em] uppercase text-[var(--muted)]">
+                        {mission.codename}
+                      </span>
+                      <h4 className="text-base font-semibold mt-0.5 mb-3">
+                        {mission.name}
+                      </h4>
+                      <div className="h-3 w-full bg-[var(--border)] rounded mb-1.5" />
+                      <div className="h-3 w-3/4 bg-[var(--border)] rounded mb-3" />
+                      <div className="pt-2 border-t border-[var(--border)]">
+                        <div className="h-4 w-20 bg-[var(--border)] rounded" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {tierMissions.map((mission, missionIdx) => {
                 const result = missionResults[mission.id];
@@ -253,10 +310,21 @@ export default function MissionSelect() {
                 );
               })}
             </div>
+            )}
           </div>
         );
       })}
       </div>
+
+      {/* Welcome modal — first visit only */}
+      {showWelcome && (
+        <WelcomeModal
+          onClose={() => {
+            setShowWelcome(false);
+            localStorage.setItem("welcomeDismissed", "1");
+          }}
+        />
+      )}
 
       {/* Mission brief modal */}
       {selectedMission && (

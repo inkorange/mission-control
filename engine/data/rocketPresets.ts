@@ -104,10 +104,10 @@ const PRESETS: Record<string, RocketPreset> = {
   // Lunar Lander — TLI + LOI + landing
   "3-3": {
     stages: [
-      { engines: [{ id: "raptor-x", count: 5 }], tanks: ["methalox-medium", "methalox-medium"] },
-      { engines: [{ id: "raptor-x", count: 2 }], tanks: ["methalox-medium"] },
+      { engines: [{ id: "raptor-x", count: 7 }], tanks: ["methalox-medium", "methalox-medium"] },
+      { engines: [{ id: "raptor-x", count: 3 }], tanks: ["methalox-medium", "methalox-medium"] },
       { engines: [{ id: "raptor-x", count: 1 }], tanks: ["methalox-medium"] },
-      { engines: [{ id: "titan-rl2", count: 1 }], tanks: ["hydrolox-medium"] },
+      { engines: [{ id: "titan-rl2", count: 2 }], tanks: ["hydrolox-small"] },
     ],
   },
 

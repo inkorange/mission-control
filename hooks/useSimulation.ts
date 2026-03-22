@@ -25,9 +25,12 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
   const deferredResultRef = useRef<FlightResult | null>(null); // Success result waiting to be shown
   const deepSpaceCutoffRef = useRef<number>(0); // Wall-clock when TLI/transfer cutoff was detected
   const MIN_FLIGHT_WALL_TIME = 20_000; // 20 seconds real time before showing success (Earth orbit)
-  // Deep space: 45s at 10,000× = 450,000 sim-seconds ≈ 5.2 days — enough to watch the coast to Moon
+  // Deep space coast uses 10,000× so the player watches the rocket reach the target body
+  // 45s at 10,000× = 450,000 sim-seconds ≈ 5.2 days — enough for a lunar transfer
   const DEEP_SPACE_COAST_TIME = 45_000;
+  const DEEP_SPACE_COAST_WARP = 10_000; // High warp during coast-to-target phase only
   const VALIDATION_TIMEOUT = 8_000; // 8 seconds real time to validate orbit
+  const RESULT_MAX_WARP = 1000; // Cap warp when mission result / validation is showing
 
   const {
     isActive,
@@ -89,7 +92,9 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
             if (coastElapsed >= DEEP_SPACE_COAST_TIME) {
               const result = deferredResultRef.current;
               deferredResultRef.current = null;
-              useFlightStore.setState({ result, isValidating: false, timeScale: useFlightStore.getState().timeScale });
+              const cappedWarp = Math.min(useFlightStore.getState().timeScale, RESULT_MAX_WARP);
+              useFlightStore.setState({ result, isValidating: false, timeScale: cappedWarp });
+              sim.setTimeScale(cappedWarp);
               saveToProgression(result);
             }
           }
@@ -99,7 +104,9 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
           if (wallElapsed >= MIN_FLIGHT_WALL_TIME) {
             const result = deferredResultRef.current;
             deferredResultRef.current = null;
-            useFlightStore.setState({ result, isValidating: false, timeScale: useFlightStore.getState().timeScale });
+            const cappedWarp = Math.min(useFlightStore.getState().timeScale, RESULT_MAX_WARP);
+            useFlightStore.setState({ result, isValidating: false, timeScale: cappedWarp });
+            sim.setTimeScale(cappedWarp);
             saveToProgression(result);
           }
         }
@@ -131,8 +138,8 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
         // so it appears closer to the actual encounter (~60% through the coast).
         if (sim.isCoasting && deepSpaceCutoffRef.current === 0 && !useFlightStore.getState().result) {
           deepSpaceCutoffRef.current = performance.now();
-          sim.setTimeScale(10000);
-          setTimeScale(10000);
+          sim.setTimeScale(DEEP_SPACE_COAST_WARP);
+          useFlightStore.setState({ timeScale: DEEP_SPACE_COAST_WARP });
         }
 
         // Start validating overlay at ~60% through the deep space coast
@@ -152,11 +159,11 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
             const targetBody = mission?.requirements.targetBody;
 
             if (targetBody) {
-              // Target body mission: bump to max warp and let the sim coast
+              // Target body mission: bump warp and let the sim coast
               // The sim has its own time limit (7 days for Moon) and detection (flyby, SOI entry)
               // Don't try to predict success/failure from distance — the Moon might be anywhere in its orbit
-              sim.setTimeScale(10000);
-              useFlightStore.setState({ timeScale: 10000 });
+              sim.setTimeScale(DEEP_SPACE_COAST_WARP);
+              useFlightStore.setState({ timeScale: DEEP_SPACE_COAST_WARP });
               // Don't reset timer — let it keep coasting without further interruption
               validationStartRef.current = 0; // Disable further timeout checks
             } else {
@@ -168,16 +175,19 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
               if (currentAlt >= targetAlt * 0.9) {
                 const result = sim.getResult();
                 result.outcome = "mission_complete";
-                useFlightStore.setState({ result, isValidating: false, timeScale: 500 });
-                sim.setTimeScale(500);
+                const cappedWarp = Math.min(useFlightStore.getState().timeScale, RESULT_MAX_WARP);
+                useFlightStore.setState({ result, isValidating: false, timeScale: cappedWarp });
+                sim.setTimeScale(cappedWarp);
                 saveToProgression(result);
                 sim.resume();
               } else {
                 const result = sim.getResult();
                 result.outcome = "orbit_achieved";
-                endFlight(result);
+                const cappedWarp = Math.min(useFlightStore.getState().timeScale, RESULT_MAX_WARP);
+                useFlightStore.setState({ result, isValidating: false, timeScale: cappedWarp });
+                sim.setTimeScale(cappedWarp);
                 saveToProgression(result);
-                return;
+                sim.resume();
               }
             }
           }
@@ -200,8 +210,9 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
             if (!useFlightStore.getState().result) {
               if (isSuborbital) {
                 // Suborbital: show immediately
-                const currentTimeScale = useFlightStore.getState().timeScale;
-                useFlightStore.setState({ result, isValidating: false, timeScale: currentTimeScale });
+                const cappedWarp = Math.min(useFlightStore.getState().timeScale, RESULT_MAX_WARP);
+                useFlightStore.setState({ result, isValidating: false, timeScale: cappedWarp });
+                sim.setTimeScale(cappedWarp);
                 saveToProgression(result);
               } else if (isDeepSpace) {
                 // Deep space (lunar, Mars, etc.): always defer and run at max warp so the player
@@ -209,15 +220,16 @@ export function useSimulation({ config, mission, engineDefs }: UseSimulationOpti
                 deferredResultRef.current = result;
                 if (deepSpaceCutoffRef.current === 0) {
                   deepSpaceCutoffRef.current = performance.now();
-                  sim.setTimeScale(10000);
-                  setTimeScale(10000);
+                  sim.setTimeScale(DEEP_SPACE_COAST_WARP);
+                  useFlightStore.setState({ timeScale: DEEP_SPACE_COAST_WARP });
                   // Fade out Guidance/FIDO — nothing actionable once transfer orbit is locked
                   useFlightStore.getState().startValidating();
                 }
               } else if (wallElapsed >= MIN_FLIGHT_WALL_TIME) {
                 // Earth orbit with enough wall time: show immediately
-                const currentTimeScale = useFlightStore.getState().timeScale;
-                useFlightStore.setState({ result, isValidating: false, timeScale: currentTimeScale });
+                const cappedWarp = Math.min(useFlightStore.getState().timeScale, RESULT_MAX_WARP);
+                useFlightStore.setState({ result, isValidating: false, timeScale: cappedWarp });
+                sim.setTimeScale(cappedWarp);
                 saveToProgression(result);
               } else {
                 // Earth orbit too early: defer

@@ -3,7 +3,11 @@ import type { FlightSnapshot, FlightResult, OrbitalElements } from "@/types/phys
 import type { FlightEvent } from "@/engine/simulation/FlightSimulator";
 
 // Persists across resets so the user's preferred warp speed carries over between launches
-let preferredTimeScale = 1;
+let preferredTimeScale = (() => {
+  if (typeof window === "undefined") return 1;
+  const saved = localStorage.getItem("preferredTimeScale");
+  return saved ? Number(saved) : 1;
+})();
 
 interface FlightState {
   isActive: boolean;
@@ -70,15 +74,11 @@ export const useFlightStore = create<FlightState>((set, get) => ({
   setTimeScale: (scale: number) => {
     const clamped = Math.max(1, Math.min(10000, scale));
     preferredTimeScale = clamped;
+    localStorage.setItem("preferredTimeScale", String(clamped));
     set({ timeScale: clamped });
   },
 
   startValidating: () => {
-    // Save current timeScale so we can restore it after validation
-    const current = get().timeScale;
-    if (current < 1000) {
-      preferredTimeScale = current; // Remember what the user had set
-    }
     set({ isValidating: true, timeScale: 1000 });
   },
 

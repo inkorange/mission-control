@@ -421,7 +421,7 @@ export default function LaunchPage({
       {/* Main flight workspace */}
       <div className="flex-1 flex overflow-hidden">
         {/* Center: Trajectory visualization */}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative min-w-0 overflow-hidden">
           <FlightScene3D targetOrbit={mission.requirements.targetOrbit} mission={mission} />
 
           {/* Pitch arc overlay — fades out during validation / post-success */}
